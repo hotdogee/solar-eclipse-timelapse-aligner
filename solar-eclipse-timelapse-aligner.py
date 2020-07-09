@@ -45,6 +45,8 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
             # otsu
             # _, img_binary = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             _, img_binary = cv2.threshold(img_gray, params['sun_threshold'], 255, cv2.THRESH_BINARY)
+            # save sun_binary
+            cv2.imwrite(str(params['jpg_sun_binary_path'] / jpg_path.name), img_binary)
             # fft convolve
             sun_signal = signal.fftconvolve(img_binary.astype('float') / 255, params['sun_mask'], mode='same')
             # find coordinates of the largest value in sun_signal
@@ -77,6 +79,9 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
                 # otsu
                 th, _ = cv2.threshold(canvas_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                 _, canvas_binary = cv2.threshold(canvas_gray, th + params['moon_threshold_mod'], 255, cv2.THRESH_BINARY)
+                # save moon_binary
+                _, moon_binary = cv2.threshold(img_gray, th + params['moon_threshold_mod'], 255, cv2.THRESH_BINARY)
+                cv2.imwrite(str(params['jpg_moon_binary_path'] / jpg_path.name), moon_binary)
                 # fft convolve
                 moon_signal = signal.fftconvolve(canvas_binary.astype('float') / 255, params['moon_mask'], mode='valid')
                 # find coordinates of the smallest values in moon_signal that are also inside the moon_signal_mask
@@ -110,7 +115,10 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
             # save circled
             cv2.imwrite(str(params['jpg_circled_path'] / jpg_path.name), circled)
     except Exception as e:
-        output_queue.put((jpg_path, -1, e))
+        if params['fix_angle'] != -1:
+            output_queue.put((jpg_path, -1, e, -1, -1, -1, -1))
+        else:
+            output_queue.put((jpg_path, -1, e))
 
 
 angle = 0
@@ -144,16 +152,16 @@ if __name__ == '__main__':
         if args.fix_angle != -1:
             # update angle if min_dist > 30 and min_dist < (sun_mask_r + moon_mask_r - 100)
             moon_x, moon_y, moon_mask_r, min_dist, moon_signal_center = circles_data['moon']
-            if min_dist > 30 and min_dist < (sun_mask_r + moon_mask_r - 100):
+            if min_dist > args.max_phase_rotation_group_threshold and min_dist < (
+                sun_mask_r + moon_mask_r - args.min_phase_rotation_group_threshold
+            ):
                 dx, dy = moon_x - moon_signal_center, moon_y - moon_signal_center
                 moon_degree = np.arctan2(dx, dy) * 180 / np.pi
                 if moon_degree > 0:
                     angle = args.fix_angle - moon_degree
                 else:
                     angle = args.fix_angle - 180 - moon_degree
-                # tqdm.write(f'Updated angle: {angle}')
-            # update moon circles
-            circles_data['moon'] = (moon_x, moon_y, moon_mask_r, min_dist, moon_signal_center, float(angle))
+            # tqdm.write(f'{jpg_path.name} angle: {angle}')
             # rotate canvas
             center = (canvas_w // 2, canvas_h // 2)
             M = cv2.getRotationMatrix2D(center, angle, 1.0)
@@ -194,14 +202,17 @@ if __name__ == '__main__':
     )
     parser.add_argument('-v', '--version', action='version', version='%(prog)s 0.1')
     parser.add_argument(
-        '-f', '--filter', action='store_true', help='Enable the clipped sun filter. (default: %(default)s)'
+        '--input',
+        type=str,
+        required=True,
+        help='Path to the input directory, will only read JPGs, develop you DNGs into JPGs first.'
     )
     parser.add_argument(
-        '--full_sun_img',
+        '--sun',
         type=str,
         default='',
         help=
-        'Path to an image with an un-eclipsed sun, used to auto detect the radius of the sun in pixels, if you do not have an image with an un-eclipsed sun, you can try using an image with the least partially eclipsed sun. (default: %(default)s)'
+        'Path to an image with an un-eclipsed sun, used to auto detect the radius of the sun in pixels, if you do not have an image with an un-eclipsed sun, you can try using an image with the least partially eclipsed sun.'
     )
     parser.add_argument(
         '--sun_radius',
@@ -238,6 +249,23 @@ if __name__ == '__main__':
         'Use a negative value to use a smaller threshold, or a positive value to use a larger threshold, choose a value that gives clean moon edges. TECHNICAL INFO: this value is added the dynamic Otsu threshold. (default: %(default)s)'
     )
     parser.add_argument(
+        '--max_phase_rotation_group_threshold',
+        type=int,
+        default=30,
+        metavar='THRESHOLD',
+        help=
+        'To solve the problem that the angle of moon is ambiguous at totality or annularity, we group the images where the distance of the sun and moon is smaller than the given value in pixels, and assume that the require rotation if the same for the whole group, and the required rotation of the image with a distance just greater than the given value is used for the whole group. (default: %(default)s)'
+    )
+    parser.add_argument(
+        '--min_phase_rotation_group_threshold',
+        type=int,
+        default=100,
+        metavar='THRESHOLD',
+        help=
+        'Moon detection for images near the start or end of the eclipse may be hard to get right, we group the images where the shadowed width is less than the given value in pixels, and assume that the require rotation if the same for the images in the same group. (default: %(default)s)'
+    )
+    parser.add_argument('--filter', action='store_true', help='Enable the clipped sun filter. (default: %(default)s)')
+    parser.add_argument(
         '--clipped_cutoff',
         type=int,
         default=40,
@@ -252,7 +280,6 @@ if __name__ == '__main__':
         'The clipped sun filter will filter out images if the brightest pixel in the image is lower than this value, in other words, there is nothing in the image. (default: %(default)s)'
     )
     parser.add_argument(
-        '-n',
         '--workers',
         type=int,
         default=-1,
@@ -260,14 +287,6 @@ if __name__ == '__main__':
         'Number of processing workers, each workers requires 3.5GB of RAM for 16M pixel images, the larger the image the more ram is required. (default: %(default)s)'
     )
     parser.add_argument(
-        '-i',
-        '--indir',
-        type=str,
-        default='./jpg',
-        help='Path to the input directory, will only read JPGs, develop you DNGs into JPGs first. (default: %(default)s)'
-    )
-    parser.add_argument(
-        '-o',
         '--output_suffix',
         type=str,
         default='-output',
@@ -275,7 +294,6 @@ if __name__ == '__main__':
         'The stabilized results will be save to a directory with the same name as the input directory appended with the given suffix. (default: %(default)s)'
     )
     parser.add_argument(
-        '-x',
         '--clipped_suffix',
         type=str,
         default='-clipped',
@@ -283,7 +301,6 @@ if __name__ == '__main__':
         'The clipped sun filer will move images to a directory with the same name as the input directory appended with the given suffix. (default: %(default)s)'
     )
     parser.add_argument(
-        '-c',
         '--circled_suffix',
         type=str,
         default='-circled',
@@ -293,24 +310,23 @@ if __name__ == '__main__':
     parser.add_argument(
         '--sun_binary_suffix',
         type=str,
-        default='',
+        default='-sun-binary',
         help=
-        'If given, black and white images using the sun threshold will be saved to a directory with the same name as the input directory appended with the given suffix. Used for finetuning the sun threshold value. (default: %(default)s)'
+        'Black and white images using the sun threshold will be saved to a directory with the same name as the input directory appended with the given suffix. Used for finetuning the sun threshold value. (default: %(default)s)'
     )
     parser.add_argument(
         '--moon_binary_suffix',
         type=str,
-        default='',
+        default='-moon-binary',
         help=
-        'If given, black and white images using the moon threshold mod will be saved to a directory with the same name as the input directory appended with the given suffix. Used for finetuning the moon threshold mod value. (default: %(default)s)'
+        'Black and white images using the moon threshold mod will be saved to a directory with the same name as the input directory appended with the given suffix. Used for finetuning the moon threshold mod value. (default: %(default)s)'
     )
     parser.add_argument(
-        '-d',
         '--circles',
         type=str,
         default='',
         help=
-        'If not given, by default, the program will save the detected sun and moon location data in JSON format to a file named circles_data.json located in the same directory as the input directory, and will overwrite the file if exists. If the detected location are good, you can choose to move the file to another location for reuse if you decide to re-develop the DNGs with better settings. If given the path to the existing good circles_data.json, the program will read the sun and moon location data from the JSON file and perform the centering and angle stabilization using the data in the JSON file. (default: %(default)s)'
+        'If not given, by default, the program will save the detected sun and moon location data in JSON format to a file named circles_data.json located in the same directory as the input directory, and will overwrite the file if exists. If the detected location are good, you can choose to move the file to another location for reuse if you decide to re-develop the DNGs with better settings. If given the path to the existing good circles_data.json, the program will read the sun and moon location data from the JSON file and perform the centering and angle stabilization using the data in the JSON file. (default: circles_data.json)'
     )
     args, unparsed = parser.parse_known_args()
     start_time = time.time()
@@ -318,28 +334,27 @@ if __name__ == '__main__':
     # verify input directory
     JPG_GLOB = '*.[jJ][pP][gG]'
     try:
-        jpg_dir_path = verify_indir_path(args.indir)
+        jpg_dir_path = verify_indir_path(args.input)
     except FileNotFoundError:
-        click.secho('ERROR: --indir does not exist, please provide directory containing JPG files.', fg='red')
+        click.secho('ERROR: --input does not exist, please provide directory containing JPG files.', fg='red')
         sys.exit(1)
     except NotADirectoryError:
-        click.secho('ERROR: --indir is a file, please provide directory containing JPG files.', fg='red')
+        click.secho('ERROR: --input is a file, please provide directory containing JPG files.', fg='red')
         sys.exit(1)
 
-    num_images = len(sorted(jpg_dir_path.glob(JPG_GLOB)))
+    input_paths = sorted(jpg_dir_path.glob(JPG_GLOB))
+    num_images = len(input_paths)
     if num_images == 0:
         click.secho(
-            'ERROR: --indir does not have any JPG files, please provide directory containing JPG files.', fg='red'
+            'ERROR: --input does not have any JPG files, please provide directory containing JPG files.', fg='red'
         )
         sys.exit(1)
     click.secho(f'INFO: {num_images} images found in {jpg_dir_path}')
 
     # get image size from first image
-    img = cv2.imread(str(sorted(jpg_dir_path.glob(JPG_GLOB))[0]), cv2.IMREAD_COLOR)
+    img = cv2.imread(str(input_paths[0]), cv2.IMREAD_COLOR)
     if img is None:
-        click.secho(
-            f'ERROR: Unable to read first image in --indir: {str(sorted(jpg_dir_path.glob(JPG_GLOB))[0])}', fg='red'
-        )
+        click.secho(f'ERROR: Unable to read first image in --input: {str(input_paths[0])}', fg='red')
         sys.exit(1)
     img_h, img_w = img.shape[:2]
     img_size = img_h * img_w
@@ -351,25 +366,25 @@ if __name__ == '__main__':
         # use given sun radius
         sun_mask_r = args.sun_radius
         click.secho(f'INFO: Using given SUN RADIUS: {sun_mask_r}')
-    elif args.full_sun_img != '':
+    elif args.sun != '':
         # detect sun radius
         try:
-            full_sun_img_path = verify_input_path(args.full_sun_img)
+            sun_path = verify_input_path(args.sun)
         except FileNotFoundError:
-            click.secho('ERROR: --full_sun_img does not exist, please provide a JPG file.', fg='red')
+            click.secho('ERROR: --sun does not exist, please provide a JPG file.', fg='red')
             sys.exit(1)
         except IsADirectoryError:
-            click.secho('ERROR: --full_sun_img is a directory, please provide a JPG file.', fg='red')
+            click.secho('ERROR: --sun is a directory, please provide a JPG file.', fg='red')
             sys.exit(1)
-        full_sun_img = cv2.imread(str(full_sun_img_path), cv2.IMREAD_COLOR)
-        full_sun_img_gray = cv2.cvtColor(full_sun_img, cv2.COLOR_BGR2GRAY)
-        _, full_sun_img_binary = cv2.threshold(full_sun_img_gray, args.sun_threshold, 255, cv2.THRESH_BINARY)
-        _, _, stats, _ = cv2.connectedComponentsWithStats(full_sun_img_binary)
+        sun = cv2.imread(str(sun_path), cv2.IMREAD_COLOR)
+        sun_gray = cv2.cvtColor(sun, cv2.COLOR_BGR2GRAY)
+        _, sun_binary = cv2.threshold(sun_gray, args.sun_threshold, 255, cv2.THRESH_BINARY)
+        _, _, stats, _ = cv2.connectedComponentsWithStats(sun_binary)
         sun_mask_r = int(max(stats[1][2:4]) // 2)
         click.secho(f'INFO: Detected SUN RADIUS: {sun_mask_r}')
     else:
         # print error message
-        click.secho(f'ERROR: Please provide either --sun_radius or --full_sun_img', fg='red')
+        click.secho(f'ERROR: Please provide either --sun or --sun_radius', fg='red')
         sys.exit(1)
 
     # moon_mask_r = 1187
@@ -395,6 +410,11 @@ if __name__ == '__main__':
     if args.filter:
         jpg_clipped_path = jpg_dir_path.parent / (jpg_dir_path.name + args.clipped_suffix)
         jpg_clipped_path.mkdir(parents=True, exist_ok=True)
+    jpg_sun_binary_path = jpg_dir_path.parent / (jpg_dir_path.name + args.sun_binary_suffix)
+    jpg_sun_binary_path.mkdir(parents=True, exist_ok=True)
+    jpg_moon_binary_path = jpg_dir_path.parent / (jpg_dir_path.name + args.moon_binary_suffix)
+    if args.fix_angle != -1:
+        jpg_moon_binary_path.mkdir(parents=True, exist_ok=True)
     jpg_circled_path = jpg_dir_path.parent / (jpg_dir_path.name + args.circled_suffix)
     jpg_circled_path.mkdir(parents=True, exist_ok=True)
     jpg_output_path = jpg_dir_path.parent / (jpg_dir_path.name + args.output_suffix)
@@ -412,6 +432,22 @@ if __name__ == '__main__':
                 # raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), path)
             with circles_data_json_path.open('r') as f:
                 circles_data = json.load(f)
+            # check if JSON file has data for all JPGs in INPUT directory
+            for jpg_path in input_paths:
+                if jpg_path.name not in circles_data or 'sun' not in circles_data[jpg_path.name]:
+                    click.secho(
+                        f'ERROR: The sun coordinates data for the JPG image "{jpg_path.name}" was not found in --circles "{str(circles_data_json_path)}". Remove the --circles argument to process the image, or provide the correct --circles JSON file that contains the sun coordinates data for the JPG image "{jpg_path.name}"',
+                        fg='red'
+                    )
+                    sys.exit(0)
+                if args.fix_angle != -1 and 'moon' not in circles_data[jpg_path.name]:
+                    click.secho(
+                        f'ERROR: The moon coordinates data for the JPG image "{jpg_path.name}" was not found in --circles "{str(circles_data_json_path)}". Remove the --circles argument to process the image, or provide the correct --circles JSON file that contains the moon coordinates data for the JPG image "{jpg_path.name}"',
+                        fg='red'
+                    )
+                    sys.exit(0)
+            # looks good
+            click.secho(f'INFO: Using existing coordinates data: "{args.circles}".')
         else:
             # doesn't exist, prompt user
             ok = click.confirm(
@@ -438,7 +474,8 @@ if __name__ == '__main__':
         workers = args.workers
         if args.workers < 1:
             # detect cpu and memory
-            estimated_memory_per_worker = 3500000000 / (3456 * 4608) * img_size
+            # 32 cpu = 98 GB - 26GB
+            estimated_memory_per_worker = 3000000000 / (3456 * 4608) * img_size
             ram_workers = psutil.virtual_memory().available // estimated_memory_per_worker
             cpu_workers = psutil.cpu_count(logical=False)
             workers = max(1, min(ram_workers, cpu_workers))
@@ -463,6 +500,8 @@ if __name__ == '__main__':
             'moon_signal_mask_size': moon_signal_mask_size,
             'moon_mask_r': moon_mask_r,
             'jpg_circled_path': jpg_circled_path,
+            'jpg_sun_binary_path': jpg_sun_binary_path,
+            'jpg_moon_binary_path': jpg_moon_binary_path,
         }
 
         # create queues
@@ -470,7 +509,7 @@ if __name__ == '__main__':
         output_queue = Queue()
 
         # submit tasks
-        for jpg_path in sorted(jpg_dir_path.glob(JPG_GLOB)):
+        for jpg_path in input_paths:
             input_queue.put(jpg_path)
 
         # input process
@@ -482,41 +521,42 @@ if __name__ == '__main__':
             input_queue.put('STOP')
 
         # save circles data
-        for _ in tqdm(
-            sorted(jpg_dir_path.glob(JPG_GLOB)),
-            desc='Processing',
-            ascii=True,
-            unit='img',
-            dynamic_ncols=True,
-            smoothing=0.1
-        ):
+        for _ in tqdm(input_paths, desc='Processing', ascii=True, unit='img', dynamic_ncols=True, smoothing=0.1):
             if args.fix_angle != -1:
                 jpg_path, sun_x, sun_y, moon_x, moon_y, min_dist, moon_signal_center = output_queue.get()
+            else:
+                jpg_path, sun_x, sun_y = output_queue.get()
+            # check for errors
+            if sun_x == -1:
+                click.secho(f'\nERROR: {jpg_path}: {sun_y}.', fg='red')
+                for p in input_processes:
+                    p.kill()
+                sys.exit(0)
+            if args.fix_angle != -1:
                 circles_data[jpg_path.name] = {
                     'moon': (moon_x, moon_y, moon_mask_r, min_dist, moon_signal_center),
                     'sun': (sun_x, sun_y, sun_mask_r)
                 }
             else:
-                jpg_path, sun_x, sun_y = output_queue.get()
                 circles_data[jpg_path.name] = {'sun': (sun_x, sun_y, sun_mask_r)}
-            # check for errors
-            if sun_x == -1:
-                click.secho(f'ERROR: {jpg_path}: {sun_y}.', fg='red')
-                for p in input_processes:
-                    p.kill()
-                sys.exit(0)
 
         circles_data_json_path.write_text(json.dumps(circles_data))
 
+    # find the first valid angle
+    if args.fix_angle != -1:
+        for jpg_path in input_paths:
+            moon_x, moon_y, moon_mask_r, min_dist, moon_signal_center = circles_data[jpg_path.name]['moon']
+            if min_dist < (sun_mask_r + moon_mask_r - args.min_phase_rotation_group_threshold):
+                dx, dy = moon_x - moon_signal_center, moon_y - moon_signal_center
+                moon_degree = np.arctan2(dx, dy) * 180 / np.pi
+                if moon_degree > 0:
+                    angle = args.fix_angle - moon_degree
+                else:
+                    angle = args.fix_angle - 180 - moon_degree
+                break
+
     # compute output image and update circles_data
-    for jpg_path in tqdm(
-        sorted(jpg_dir_path.glob(JPG_GLOB)),
-        desc='    Saving',
-        ascii=True,
-        unit='img',
-        dynamic_ncols=True,
-        smoothing=0.1
-    ):
+    for jpg_path in tqdm(input_paths, desc='    Saving', ascii=True, unit='img', dynamic_ncols=True, smoothing=0.1):
         output_image(jpg_path, circles_data[jpg_path.name])
 
     # exit
