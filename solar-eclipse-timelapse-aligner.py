@@ -6,17 +6,18 @@ import shutil
 import psutil
 import sys
 import time
-from multiprocessing import Manager, Process, Queue, Value
+from multiprocessing import Manager, Process, Queue, Value, freeze_support
 from pathlib import Path
 
 import cv2
+import click
 import numpy as np
 from scipy import signal, spatial
 from tqdm import tqdm
 
-if __name__ == '__main__':
 
-    def find_sun_and_moon_worker(input_queue, output_queue):
+def find_sun_and_moon_worker(input_queue, output_queue, params):
+    try:
         for jpg_path in iter(input_queue.get, 'STOP'):
             # put the sun in the center of an image with enough border for moon detection by conv2d
             # we'll need a square image with sides of
@@ -25,13 +26,14 @@ if __name__ == '__main__':
             img = cv2.imread(str(jpg_path), cv2.IMREAD_COLOR)
             # (3456, 4608, 3)
             # remove images with white values on border (CLIPPED SUN)
-            if args.filter:
-                if img[:, (0, -1), 1].max() > args.clipped_cutoff or img[(0, -1), :, 1].max() > args.clipped_cutoff:
+            if params['filter']:
+                if img[:, (0, -1), 1].max() > params['clipped_cutoff'] or img[(0, -1), :,
+                                                                              1].max() > params['clipped_cutoff']:
                     # print(f'Moving {jpg_path.name} with CLIPPED SUN ({clipped_count})')
                     shutil.move(jpg_path, jpg_clipped_path / jpg_path.name)
                     continue
                 # remove images with all black values (NO SUN)
-                if img.max() < args.empty_cutoff:
+                if img.max() < params['empty_cutoff']:
                     # print(f'Moving {jpg_path.name} with NO SUN ({empty_count})')
                     shutil.move(jpg_path, jpg_clipped_path / jpg_path.name)
                     continue
@@ -42,27 +44,27 @@ if __name__ == '__main__':
             img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             # otsu
             # _, img_binary = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            _, img_binary = cv2.threshold(img_gray, args.sun_threshold, 255, cv2.THRESH_BINARY)
+            _, img_binary = cv2.threshold(img_gray, params['sun_threshold'], 255, cv2.THRESH_BINARY)
             # fft convolve
-            sun_signal = signal.fftconvolve(img_binary.astype('float') / 255, sun_mask, mode='same')
+            sun_signal = signal.fftconvolve(img_binary.astype('float') / 255, params['sun_mask'], mode='same')
             # find coordinates of the largest value in sun_signal
             y, x = np.unravel_index(np.argmax(sun_signal, axis=None), sun_signal.shape)
             sun_x, sun_y = int(x), int(y)
             # draw sun circle on circled
             circled = img.copy()
-            a = cv2.circle(circled, (sun_x, sun_y), sun_mask_r, (0, 0, 255), 4)
+            a = cv2.circle(circled, (sun_x, sun_y), params['sun_mask_r'], (0, 0, 255), 4)
             a = cv2.rectangle(circled, (sun_x - 5, sun_y - 5), (sun_x + 5, sun_y + 5), (0, 128, 255), -1)
             #####################
             # find center of moon
             #####################
-            if args.fix_angle != -1:
+            if params['fix_angle'] != -1:
                 img_h, img_w = img.shape[:2]
                 # pad image to canvas_size
-                pad_x, pad_y = (canvas_size - img_w) // 2, (canvas_size - img_h) // 2
+                pad_x, pad_y = (params['canvas_size'] - img_w) // 2, (params['canvas_size'] - img_h) // 2
                 padded = np.pad(img, ((pad_y, pad_y), (pad_x, pad_x), (0, 0)))
                 # calculate the distance between the center of the sun and the center of the image
                 center_x, center_y = img_w // 2, img_h // 2
-                canvas = np.zeros((canvas_size, canvas_size, img.shape[2]), dtype=np.uint8)
+                canvas = np.zeros((params['canvas_size'], params['canvas_size'], img.shape[2]), dtype=np.uint8)
                 dx, dy = center_x - sun_x, center_y - sun_y
                 # draw sun at the center of the canvas
                 left, right = (0, dx) if dx > 0 else (-dx, 0)
@@ -74,11 +76,11 @@ if __name__ == '__main__':
                 canvas_gray = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY)
                 # otsu
                 th, _ = cv2.threshold(canvas_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                _, canvas_binary = cv2.threshold(canvas_gray, th + args.moon_threshold_mod, 255, cv2.THRESH_BINARY)
+                _, canvas_binary = cv2.threshold(canvas_gray, th + params['moon_threshold_mod'], 255, cv2.THRESH_BINARY)
                 # fft convolve
-                moon_signal = signal.fftconvolve(canvas_binary.astype('float') / 255, moon_mask, mode='valid')
+                moon_signal = signal.fftconvolve(canvas_binary.astype('float') / 255, params['moon_mask'], mode='valid')
                 # find coordinates of the smallest values in moon_signal that are also inside the moon_signal_mask
-                rows, cols = np.where((moon_signal < 1) * (moon_signal_mask > 0))
+                rows, cols = np.where((moon_signal < 1) * (params['moon_signal_mask'] > 0))
                 # find the coordinate closest to the center of the sun (closest to the center of the moon_signal image)
                 moon_signal_center = moon_signal.shape[0] // 2
                 moon_x, moon_y, min_dist = 0, 0, 99999
@@ -88,14 +90,14 @@ if __name__ == '__main__':
                         moon_x, moon_y, min_dist = int(cols[i]), int(rows[i]), float(dist)
                 # calculate moon coordinates in the original image
                 # moon_x is relative to moon_signal (4802, 4802)
-                original_moon_x = moon_x - (moon_signal_mask_size - img_w) // 2 - dx
-                original_moon_y = moon_y - (moon_signal_mask_size - img_h) // 2 - dy
+                original_moon_x = moon_x - (params['moon_signal_mask_size'] - img_w) // 2 - dx
+                original_moon_y = moon_y - (params['moon_signal_mask_size'] - img_h) // 2 - dy
                 # DSCN0437.jpg: 3010, 4375, 1288, -77 -  4624, 2914, 1864, 154
                 # tqdm.write(
                 #     f'{jpg_path.name}: {original_moon_x}, {moon_x}, {pad_x}, {dx} - {original_moon_y}, {moon_y}, {pad_y}, {dy}'
                 # )
                 # draw moon circle on circled
-                a = cv2.circle(circled, (original_moon_x, original_moon_y), moon_mask_r, (0, 255, 0), 4)
+                a = cv2.circle(circled, (original_moon_x, original_moon_y), params['moon_mask_r'], (0, 255, 0), 4)
                 a = cv2.rectangle(
                     circled, (original_moon_x - 5, original_moon_y - 5), (original_moon_x + 5, original_moon_y + 5),
                     (0, 128, 255), -1
@@ -106,11 +108,17 @@ if __name__ == '__main__':
                 # put in queue
                 output_queue.put((jpg_path, sun_x, sun_y))
             # save circled
-            cv2.imwrite(str(jpg_circled_path / jpg_path.name), circled)
+            cv2.imwrite(str(params['jpg_circled_path'] / jpg_path.name), circled)
+    except Exception as e:
+        output_queue.put((jpg_path, -1, e))
 
-    angle = 0
+
+angle = 0
+if __name__ == '__main__':
+    freeze_support()
 
     def output_image(jpg_path, circles_data):
+        global angle
         # circles_data = {
         #     'moon': (moon_x, moon_y, moon_mask_r, min_dist, moon_signal_center),
         #     'sun': (sun_x, sun_y, sun_mask_r)
@@ -126,6 +134,7 @@ if __name__ == '__main__':
         # calculate the distance between the center of the sun and the center of the image
         center_x, center_y = img_w // 2, img_h // 2
         canvas = np.zeros((canvas_size, canvas_size, img.shape[2]), dtype=np.uint8)
+        canvas_h, canvas_w = canvas.shape[:2]
         dx, dy = center_x - sun_x, center_y - sun_y
         # draw sun at the center of the canvas
         left, right = (0, dx) if dx > 0 else (-dx, 0)
@@ -146,12 +155,11 @@ if __name__ == '__main__':
             # update moon circles
             circles_data['moon'] = (moon_x, moon_y, moon_mask_r, min_dist, moon_signal_center, float(angle))
             # rotate canvas
-            (h, w) = canvas.shape[:2]
-            center = (w // 2, h // 2)
+            center = (canvas_w // 2, canvas_h // 2)
             M = cv2.getRotationMatrix2D(center, angle, 1.0)
-            canvas = cv2.warpAffine(canvas, M, (w, h))
+            canvas = cv2.warpAffine(canvas, M, (canvas_w, canvas_h))
         # crop to original size
-        crop_x, crop_y = (w - crop_w) // 2, (h - crop_h) // 2
+        crop_x, crop_y = (canvas_w - crop_w) // 2, (canvas_h - crop_h) // 2
         cropped = canvas[crop_y:crop_y + crop_h, crop_x:crop_x + crop_w]
         # save cropped
         cv2.imwrite(str(jpg_output_path / jpg_path.name), cropped)
@@ -302,41 +310,72 @@ if __name__ == '__main__':
         type=str,
         default='',
         help=
-        'Path to use existing circles_data.json, if not given, will compute the data by default. (default: %(default)s)'
+        'If not given, by default, the program will save the detected sun and moon location data in JSON format to a file named circles_data.json located in the same directory as the input directory, and will overwrite the file if exists. If the detected location are good, you can choose to move the file to another location for reuse if you decide to re-develop the DNGs with better settings. If given the path to the existing good circles_data.json, the program will read the sun and moon location data from the JSON file and perform the centering and angle stabilization using the data in the JSON file. (default: %(default)s)'
     )
     args, unparsed = parser.parse_known_args()
     start_time = time.time()
 
-    # parameters
+    # verify input directory
     JPG_GLOB = '*.[jJ][pP][gG]'
+    try:
+        jpg_dir_path = verify_indir_path(args.indir)
+    except FileNotFoundError:
+        click.secho('ERROR: --indir does not exist, please provide directory containing JPG files.', fg='red')
+        sys.exit(1)
+    except NotADirectoryError:
+        click.secho('ERROR: --indir is a file, please provide directory containing JPG files.', fg='red')
+        sys.exit(1)
+
+    num_images = len(sorted(jpg_dir_path.glob(JPG_GLOB)))
+    if num_images == 0:
+        click.secho(
+            'ERROR: --indir does not have any JPG files, please provide directory containing JPG files.', fg='red'
+        )
+        sys.exit(1)
+    click.secho(f'INFO: {num_images} images found in {jpg_dir_path}')
 
     # get image size from first image
     img = cv2.imread(str(sorted(jpg_dir_path.glob(JPG_GLOB))[0]), cv2.IMREAD_COLOR)
+    if img is None:
+        click.secho(
+            f'ERROR: Unable to read first image in --indir: {str(sorted(jpg_dir_path.glob(JPG_GLOB))[0])}', fg='red'
+        )
+        sys.exit(1)
     img_h, img_w = img.shape[:2]
     img_size = img_h * img_w
     crop_w, crop_h = img_w, img_h
+    click.secho(f'INFO: Detected image size (height, width): {img.shape[:2]}')
 
     # set sun radius
     if args.sun_radius != -1:
         # use given sun radius
         sun_mask_r = args.sun_radius
-        print(f'Using given SUN RADIUS: {sun_mask_r}')
+        click.secho(f'INFO: Using given SUN RADIUS: {sun_mask_r}')
     elif args.full_sun_img != '':
         # detect sun radius
-        full_sun_img_path = verify_input_path(args.full_sun_img)
+        try:
+            full_sun_img_path = verify_input_path(args.full_sun_img)
+        except FileNotFoundError:
+            click.secho('ERROR: --full_sun_img does not exist, please provide a JPG file.', fg='red')
+            sys.exit(1)
+        except IsADirectoryError:
+            click.secho('ERROR: --full_sun_img is a directory, please provide a JPG file.', fg='red')
+            sys.exit(1)
         full_sun_img = cv2.imread(str(full_sun_img_path), cv2.IMREAD_COLOR)
         full_sun_img_gray = cv2.cvtColor(full_sun_img, cv2.COLOR_BGR2GRAY)
         _, full_sun_img_binary = cv2.threshold(full_sun_img_gray, args.sun_threshold, 255, cv2.THRESH_BINARY)
         _, _, stats, _ = cv2.connectedComponentsWithStats(full_sun_img_binary)
-        sun_mask_r = max(stats[1][2:4]) // 2
-        print(f'Using detected SUN RADIUS: {sun_mask_r}')
+        sun_mask_r = int(max(stats[1][2:4]) // 2)
+        click.secho(f'INFO: Detected SUN RADIUS: {sun_mask_r}')
     else:
         # print error message
-        print(f'ERROR: Please provide either --sun_radius or --full_sun_img')
+        click.secho(f'ERROR: Please provide either --sun_radius or --full_sun_img', fg='red')
         sys.exit(1)
 
     # moon_mask_r = 1187
     moon_mask_r = sun_mask_r + args.moon_radius_mod
+    if args.fix_angle != -1:
+        click.secho(f'INFO: Using MOON RADIUS: {moon_mask_r} (sun_radius + moon_radius_mod)')
     # 7184
     canvas_size = (sun_mask_r + moon_mask_r * 2) * 2
     # 4802
@@ -345,15 +384,12 @@ if __name__ == '__main__':
 
     # create masks
     sun_mask = np.zeros((sun_mask_r * 2 + 1, sun_mask_r * 2 + 1), np.float32)
-    a = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r, 1.0, -1)
-    a = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r - 50, 0.0, -1)
+    _ = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r, 1.0, -1)
+    _ = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r - 50, 0.0, -1)
     moon_mask = np.zeros((moon_mask_r * 2 + 1, moon_mask_r * 2 + 1), np.float32)
-    a = cv2.circle(moon_mask, (moon_mask_r, moon_mask_r), moon_mask_r, 1.0, -1)
+    _ = cv2.circle(moon_mask, (moon_mask_r, moon_mask_r), moon_mask_r, 1.0, -1)
     moon_signal_mask = np.zeros((moon_signal_mask_size, moon_signal_mask_size), np.float32)
-    a = cv2.circle(moon_signal_mask, (moon_signal_mask_r, moon_signal_mask_r), moon_signal_mask_r, 1.0, -1)
-
-    # verify paths
-    jpg_dir_path = verify_indir_path(args.indir)
+    _ = cv2.circle(moon_signal_mask, (moon_signal_mask_r, moon_signal_mask_r), moon_signal_mask_r, 1.0, -1)
 
     # setup dirs
     if args.filter:
@@ -363,23 +399,72 @@ if __name__ == '__main__':
     jpg_circled_path.mkdir(parents=True, exist_ok=True)
     jpg_output_path = jpg_dir_path.parent / (jpg_dir_path.name + args.output_suffix)
     jpg_output_path.mkdir(parents=True, exist_ok=True)
-    circles_data_json_path = jpg_dir_path.parent / 'circles_data.json'
-
-    # workers
-    workers = args.workers
-    if args.workers == -1:
-        # detect cpu and memory
-        estimated_memory_per_worker = 3500000000 / (3456 * 4608) * img_size
-        ram_workers = psutil.virtual_memory().available // estimated_memory_per_worker
-        cpu_workers = psutil.cpu_count(logical=False)
-        workers = max(1, min(ram_workers, cpu_workers))
 
     # read circles if given
     if args.circles != '':
-        circles_path = verify_input_path(args.circles)
-        with circles_path.open('r') as f:
-            circles_data = json.load(f)
+        # get absolute path
+        circles_data_json_path = Path(os.path.abspath(os.path.expanduser(args.circles)))
+        if circles_data_json_path.exists():
+            # error out if given a directory
+            if circles_data_json_path.is_dir():
+                click.secho('ERROR: --circles is a directory, please provide a JSON file.', fg='red')
+                sys.exit(0)
+                # raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), path)
+            with circles_data_json_path.open('r') as f:
+                circles_data = json.load(f)
+        else:
+            # doesn't exist, prompt user
+            ok = click.confirm(
+                click.style(
+                    f'ATTENTION: --circles file does not exist. Continue to run the detection algorithm and save the results to: \'{str(circles_data_json_path)}\'?',
+                    fg='yellow'
+                ),
+                default=True,
+                abort=False
+            )
+            if ok:
+                # initialize circles_data
+                circles_data = {}
+            else:
+                # user does not want to continue, exit
+                # raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
+                sys.exit(0)
     else:
+        circles_data_json_path = jpg_dir_path.parent / 'circles_data.json'
+        circles_data = {}
+
+    if not circles_data:
+        # get number of workers
+        workers = args.workers
+        if args.workers < 1:
+            # detect cpu and memory
+            estimated_memory_per_worker = 3500000000 / (3456 * 4608) * img_size
+            ram_workers = psutil.virtual_memory().available // estimated_memory_per_worker
+            cpu_workers = psutil.cpu_count(logical=False)
+            workers = max(1, min(ram_workers, cpu_workers))
+        if workers == 1:
+            click.secho('INFO: Starting 1 worker.')
+        else:
+            click.secho(f'INFO: Starting {workers} workers.')
+
+        # setup params
+        params = {
+            'filter': args.filter,
+            'clipped_cutoff': args.clipped_cutoff,
+            'empty_cutoff': args.empty_cutoff,
+            'sun_threshold': args.sun_threshold,
+            'sun_mask': sun_mask,
+            'sun_mask_r': sun_mask_r,
+            'fix_angle': args.fix_angle,
+            'canvas_size': canvas_size,
+            'moon_threshold_mod': args.moon_threshold_mod,
+            'moon_mask': moon_mask,
+            'moon_signal_mask': moon_signal_mask,
+            'moon_signal_mask_size': moon_signal_mask_size,
+            'moon_mask_r': moon_mask_r,
+            'jpg_circled_path': jpg_circled_path,
+        }
+
         # create queues
         input_queue = Queue()
         output_queue = Queue()
@@ -391,14 +476,20 @@ if __name__ == '__main__':
         # input process
         input_processes = []
         for i in range(workers):
-            ip = Process(target=find_sun_and_moon_worker, args=(input_queue, output_queue))
+            ip = Process(target=find_sun_and_moon_worker, args=(input_queue, output_queue, params))
             ip.start()
             input_processes.append(ip)
             input_queue.put('STOP')
 
         # save circles data
-        circles_data = {}
-        for _ in tqdm(sorted(jpg_dir_path.glob(JPG_GLOB))):
+        for _ in tqdm(
+            sorted(jpg_dir_path.glob(JPG_GLOB)),
+            desc='Processing',
+            ascii=True,
+            unit='img',
+            dynamic_ncols=True,
+            smoothing=0.1
+        ):
             if args.fix_angle != -1:
                 jpg_path, sun_x, sun_y, moon_x, moon_y, min_dist, moon_signal_center = output_queue.get()
                 circles_data[jpg_path.name] = {
@@ -408,11 +499,24 @@ if __name__ == '__main__':
             else:
                 jpg_path, sun_x, sun_y = output_queue.get()
                 circles_data[jpg_path.name] = {'sun': (sun_x, sun_y, sun_mask_r)}
+            # check for errors
+            if sun_x == -1:
+                click.secho(f'ERROR: {jpg_path}: {sun_y}.', fg='red')
+                for p in input_processes:
+                    p.kill()
+                sys.exit(0)
 
         circles_data_json_path.write_text(json.dumps(circles_data))
 
     # compute output image and update circles_data
-    for jpg_path in tqdm(sorted(jpg_dir_path.glob(JPG_GLOB))):
+    for jpg_path in tqdm(
+        sorted(jpg_dir_path.glob(JPG_GLOB)),
+        desc='    Saving',
+        ascii=True,
+        unit='img',
+        dynamic_ncols=True,
+        smoothing=0.1
+    ):
         output_image(jpg_path, circles_data[jpg_path.name])
 
     # exit

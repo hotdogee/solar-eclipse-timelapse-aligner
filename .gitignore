@@ -133,3 +133,7 @@ dev/
 
 # vscode
 .vscode/
+
+# jpg test
+jpg*/
+circles_data.json
