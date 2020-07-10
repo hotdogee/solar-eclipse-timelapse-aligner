@@ -1,4 +1,5 @@
 # solar-eclipse-timelapse-aligner
+[![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=hotdogee@gmail.com&lc=US&item_name=Solar+eclipse+timelapse+aligner+Development+Support&no_note=0&cn=&currency_code=USD&bn=PP-DonationsBF:btn_donateCC_LG.gif:NonHosted)
 
 This specialized program is used to align and stabilize solar eclipse time-lapse photos.
 It was originally developed to process images of the 2020/6/21 annular solar eclipse taken from a Nikon P950 at a 2 second interval.
@@ -332,3 +333,15 @@ optional arguments:
                         the centering and angle stabilization using the data
                         in the JSON file. (default: circles_data.json)
 ```
+
+
+# Contribute
+
+* Pull request for bug fixes and new features are welcome!
+  
+
+# Donations
+
+If this project has helped you save some time, you can give me a cup of coffee :)
+
+[![paypal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)]([YOUR_EMAIL_CODE](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=hotdogee@gmail.com&lc=US&item_name=Solar+eclipse+timelapse+aligner+Development+Support&no_note=0&cn=&currency_code=USD&bn=PP-DonationsBF:btn_donateCC_LG.gif:NonHosted))
