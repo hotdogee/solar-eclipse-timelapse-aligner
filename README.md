@@ -58,7 +58,7 @@ Download the compiled EXE from the releases page on github and run the program f
 
 ### Step by step
 
-1. Download the latest version from the releases page
+1. Download the latest version from the releases page: https://github.com/hotdogee/solar-eclipse-timelapse-aligner/releases/download/v1.0/solar-eclipse-timelapse-aligner-v1.0-windows-x64.zip
 
 2. Unzip the downloaded file, there should be a bat file named `start-cmd.bat` and a directory named `eclipse-aligner` with the exe `eclipse-aligner.exe` and a bunch of other files required by the exe inside.
    * NOTE: The exe needs to be located together with the other files inside the `eclipse-aligner` directory to work, if you want to move the exe to a different location, you need to move the whole directory.
