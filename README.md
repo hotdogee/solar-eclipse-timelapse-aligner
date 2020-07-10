@@ -110,7 +110,7 @@ python eclipse-aligner.py -h
 
 # Example input images
 
-Download the example input images here:
+Download the example input images here: https://drive.google.com/file/d/10VEHLhs8JEQbKvKjmRGHTbSi0DoADwVS/view?usp=sharing
 
 
 # High level workflow
