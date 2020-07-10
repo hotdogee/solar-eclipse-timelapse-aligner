@@ -1,0 +1,2 @@
+cd eclipse-aligner
+cmd
