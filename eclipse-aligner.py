@@ -200,7 +200,7 @@ if __name__ == '__main__':
         description='This specialized program is used to align and stabilize solar eclipse time-lapse photos',
         prog='eclipse-aligner'
     )
-    parser.add_argument('-v', '--version', action='version', version='%(prog)s 0.1')
+    parser.add_argument('-v', '--version', action='version', version='%(prog)s v1.0')
     parser.add_argument(
         '--input',
         type=str,
