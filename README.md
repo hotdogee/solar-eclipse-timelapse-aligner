@@ -27,7 +27,7 @@ Note: If your solar images were taken with a narrow band Ha filter, your images 
 
 * Location stabilization: Outputs new images with the sun moved to the center of the image.
 * Rotation stabilization: Outputs new images with the sun moved to the center of the image and rotated so that the moon enters from the same angle.
-* Multi-core CPU support: Will process multiple images in parallel.
+* Multi-core CPU support: Will estimate the number of processes to use using the detected available memory and number of real CPU cores.
 * Detect the center coordinates of the sun and the moon, the results are saved in a JSON file.
 * Detect the radius of the sun given a full sun image.
 * Command line interface to manually fine-tune the detection parameters if the defaults are not perfect.
