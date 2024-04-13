@@ -1,12 +1,11 @@
 # solar-eclipse-timelapse-aligner
-[![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=hotdogee@gmail.com&lc=US&item_name=Solar+eclipse+timelapse+aligner+Development+Support&no_note=0&cn=&currency_code=USD&bn=PP-DonationsBF:btn_donateCC_LG.gif:NonHosted)
 
 This specialized program is used to align and stabilize solar eclipse time-lapse photos.
-It was originally developed to process images of the 2020/6/21 annular solar eclipse taken from a Nikon P950 at a 2 second interval.
+It was originally developed by Han Lin (@hotdogee) in to process images of the 2020-06-21 annular solar eclipse taken from a Nikon P950 at a 2 second interval.
 
 # About
 
-The eclipse images I took had a black background with no details and a smooth surface sun with also no high contrast features for general image stabilization methods to match across the images. This program detects the location of the sun in the input images and saves a new image in the output directory with the sun moved to the center of the image.
+The eclipse images that the original creator of this project took had a black background with no details and a smooth surface sun with also no high contrast features for general image stabilization methods to match across the images. This program detects the location of the sun in the input images and saves a new image in the output directory with the sun moved to the center of the image.
 
 Note: If your solar images were taken with a narrow band Ha filter, your images will likely have enough details for general stabilization methods to work.
 
@@ -41,8 +40,9 @@ Sun detection and sun centering works best if your images meet the following req
 2. Images need to have clean dark backgrounds.
 3. The sun needs to have clean edges when the program converts the image into black and white with a given threshold.
 4. The size (in pixels) of the sun in the images needs to be constant, this should be true unless you changed the focal length during the shooting session.
-5. The sun should be fully visible in all images, in other words, it should not be partially cut off at the edges. This program has a clipped sun filter, when enabled, will filter out images with edge pixels over a certain brightness level.
-6. (Optional) For the auto sun radius detect feature, a photo of the sun where the sun is clear of clouds and mostly or completely un-eclipsed is used, this is usually the first or last clear photo in the shooting session, a full sun with no clouds works best. 
+5. The radius (in pixels) of the sun needs to be greater than 50. If your photos have the sun smaller than this, you'll need to batch resize them.
+6. The sun should be fully visible in all images. In other words, it should not be partially cut off at the edges. This program has a clipped sun filter, when enabled, will filter out images with edge pixels over a certain brightness level.
+7. (Optional) For the auto sun radius detect feature, a photo of the sun where the sun is clear of clouds and mostly or completely un-eclipsed is used, this is usually the first or last clear photo in the shooting session, a full sun with no clouds works best. 
 
 Moon detection and moon angle stabilization currently only works if your images meet the following additional requirements:
 
@@ -52,69 +52,42 @@ Moon detection and moon angle stabilization currently only works if your images 
 
 # Installation
 
-## Option 1: Run the executable (Windows 64bit)
+## Run the Python source code (Windows, Mac, Linux)
 
-Download the compiled EXE from the releases page on github and run the program from the command line or powershell.
-
-### Step by step
-
-1. Download the latest version from the releases page: https://github.com/hotdogee/solar-eclipse-timelapse-aligner/releases/download/v1.0/solar-eclipse-timelapse-aligner-v1.0-windows-x64.zip
-
-2. Unzip the downloaded file, there should be a bat file named `start-cmd.bat` and a directory named `eclipse-aligner` with the exe `eclipse-aligner.exe` and a bunch of other files required by the exe inside.
-   * NOTE: The exe needs to be located together with the other files inside the `eclipse-aligner` directory to work, if you want to move the exe to a different location, you need to move the whole directory.
-
-3. Open Command Prompt or Powershell and navigate to directory `eclipse-aligner` inside the unzipped files.
-   * TIP: For your convenience, you can also double click on the `start-cmd.bat` to open up Command Prompt and drop you inside the `eclipse-aligner` directory, instead of doing it manually.
-
-4. Run the program to print a list of arguments by typing `eclipse-aligner.exe` and pressing `ENTER`, you should see the following output (the error message is normal):
-    ```
-    usage: eclipse-aligner [-h] [-v] --input INPUT [--sun SUN]
-                        [--sun_radius SUN_RADIUS]
-                        [--sun_threshold SUN_THRESHOLD] [--fix_angle FIX_ANGLE]
-                        [--moon_radius_mod MOON_RADIUS_MOD]
-                        [--moon_threshold_mod MOON_THRESHOLD_MOD]
-                        [--max_phase_rotation_group_threshold THRESHOLD]
-                        [--min_phase_rotation_group_threshold THRESHOLD]
-                        [--filter] [--clipped_cutoff CLIPPED_CUTOFF]
-                        [--empty_cutoff EMPTY_CUTOFF] [--workers WORKERS]
-                        [--output_suffix OUTPUT_SUFFIX]
-                        [--clipped_suffix CLIPPED_SUFFIX]
-                        [--circled_suffix CIRCLED_SUFFIX]
-                        [--sun_binary_suffix SUN_BINARY_SUFFIX]
-                        [--moon_binary_suffix MOON_BINARY_SUFFIX]
-                        [--circles CIRCLES]
-    eclipse-aligner: error: the following arguments are required: --input
-    ```
-    NOTE: if you are using Powershell instead of the Command Prompt, you should add `.\` in front of the exe like this: `.\eclipse-aligner.exe` to run the program.
-
-6. Run `eclipse-aligner.exe -h` to print the full help.
-
-## Option 2: Run the Python source code (Windows, Mac, Linux)
-
-If you are comfortable working with the Python environment, you can clone the project, pip install the requirements, and directly run the source code.
+This assumes you are familiar with Python. You can clone the project, pip install the requirements, and directly run the source code.
 
 ```bash
 # Install Python 3.7 on your OS, and optionally create and activate a new virtual environment
 # Clone this repo
-git clone https://github.com/hotdogee/solar-eclipse-timelapse-aligner.git
+git clone https://github.com/patitsas/solar-eclipse-timelapse-aligner.git
 # Change directory
 cd solar-eclipse-timelapse-aligner
-# Install required packages
+# Install required packages. If this command fails, open requirements.txt and install each one individually.
 pip install -r requirements.txt
 # Run the program, you should see a list of arguments and an error message for missing arguments: --input
 python eclipse-aligner.py
 # Print the full help message
 python eclipse-aligner.py -h
+# Optional: run these examples of input to confirm there are no errors (see below for information on workflow)
+python eclipse-aligner.py --input=example0/ --sun=example0/ring.jpg --circles=example0.json
+python eclipse-aligner.py --input=example1/ --sun_radius=110 --circles=example1.json
+python eclipse-aligner.py --input=example2/ --sun_radius=141 --sun_threshold=75 --circles=example2.json
 ```
+The optional commands at the end are to check the program is functioning. It will ask you if it can save the detection location information to example0.json, example1.json, etc; enter yes. If everything is functioning smoothly, delete those files.
 
-
-# Example input images
-
-Download the example input images here: https://drive.google.com/file/d/10VEHLhs8JEQbKvKjmRGHTbSi0DoADwVS/view?usp=sharing
-
+If things are not running smoothly, check the contents of the json files. The filenames may appear in a different order and this is normal (Python dictionary). You want to check the numbers are the same for each filename.
+```
+>> cat example0.json
+{"ring.jpg": {"sun": [240, 180, 127]}}
+>> cat example1.json
+{"ex1.jpg": {"sun": [238, 153, 110]}, "ex2.jpg": {"sun": [251, 147, 110]}, "ex3.jpg": {"sun": [276, 132, 110]}, "ex4.jpg": {"sun": [284, 140, 110]}, "ex5.jpg": {"sun": [302, 144, 110]}, "ex6.jpg": {"sun": [189, 131, 110]}}
+>> cat example2.json
+{"DSC05688.jpg": {"sun": [1382, 1166, 141]}, "DSC05690.jpg": {"sun": [1569, 1360, 141]}, "DSC05686.jpg": {"sun": [713, 1099, 141]}, "DSC05702.jpg": {"sun": [477, 1539, 141]}, "DSC05703.jpg": {"sun": [544, 1549, 141]}, "DSC05704.jpg": {"sun": [653, 919, 141]}, "DSC05712.jpg": {"sun": [1322, 1357, 141]}, "DSC05709.jpg": {"sun": [1174, 1239, 141]}, "DSC05717.jpg": {"sun": [927, 1451, 141]}, "DSC05722.jpg": {"sun": [1234, 1654, 141]}, "DSC05719.jpg": {"sun": [1032, 1516, 141]}, "DSC05724.jpg": {"sun": [1248, 1729, 141]}, "DSC05725.jpg": {"sun": [1103, 1740, 141]}, "DSC05728.jpg": {"sun": [1137, 1781, 141]}}
+```
 
 # High level workflow
 
+0. (Optional) Test the program with the provided examples. There are three sets of examples provided: example0, example1, and example2.
 1. (Optional) Test the program with the example images to learn what results you should expect.
 2. (Recommended) Pick a couple images (3 to 10) representative of the different stages of the eclipse, and process them with the program to quickly find a set of parameters that work well with all of the representative images.
 3. Use the same parameters found in step 2 to process the full image set, if the results are not perfect, use the images that had incorrect detection to fine tune the parameters.
@@ -153,9 +126,12 @@ This program currently only has a command line interface.
     ![Output Directories](docs/output-directories.jpg)
     ![Sun Results](docs/sun-results.jpg)
 
-4. Check the resulting centered images inside the `-output` directory. The directory will created along side the `--input` directory, for example, if your input directory is `./jpg`, the `-output` directory will be at `./jpg-output`.
+4. If you get an error that the sun radius is computed as 0 pixels, you have two options: adjust the threshold for the sun, and/or calculate the radius yourself. It is probably easiest to do the latter. To calculate the radius, open up your example file in an image editor. Find the pixel coordinates of two ends of the diameter, and use them to calculate the diameter, and then radius.
 
-5. If the results are not perfect, fine-tuning a few parameters may fix the problem. Start the fine-tuning process by viewing the images inside the `-circled` directory. The red circle represents the detected sun location, if the circles are off, follow the steps for `Fine-tuning the sun detection` below.
+5. Check the resulting centered images inside the `-output` directory. The directory will created along side the `--input` directory, for example, if your input directory is `./jpg`, the `-output` directory will be at `./jpg-output`.
+
+6. If the results are not perfect, fine-tuning a few parameters may fix the problem. Start the fine-tuning process by viewing the images inside the `-circled` directory. The red circle represents the detected sun location, if the circles are off, follow the steps for `Fine-tuning the sun detection` below.
+
 
 ## Enable the clipped sun filter
 
@@ -181,7 +157,7 @@ This program currently only has a command line interface.
 NOTE: Only works for total solar eclipse or annular solar eclipse, this part of the program assumes that the center of the moon pass through the center of the sun at the maximum point in your images.
 Use this feature if after viewing the results sun centering, you determine that the rotation of the sun also needs to be fixed.
 
-1. `--fix_angle` Set a value between `0` and `359` in degrees, check the image below of examples when this argument is set to `0`, `90`, `180`, and `270`.
+1. `--fix_angle` This parameter will rotate the outputted images by this angle. Set a value between `0` and `359` in degrees, check the image below of examples when this argument is set to `0`, `90`, `180`, and `270`.
    ![Angle Example](docs/doc-angle.jpg)
 
 3. `--moon_radius_mod` (MOON_RADIUS - SUN_RADIUS) in pixels, use a negative value if the moon is smaller than the sun (as is the case of annular solar eclipse). There is currently no auto-detect feature for the moon radius, use Photoshop or similar software to figure out how much larger or smaller in pixels is the moon when compared to the sun. For example, if the width of the moon is 2372, the moon radius would be 1186, and if the sun radius is 1210, set `--moon_radius_mod` to -24 (because 1186 - 1210 = -24).
@@ -254,9 +230,10 @@ optional arguments:
                         black and white, choose a value that gives clean edges
                         for best results. (default: 25)
   --fix_angle FIX_ANGLE
-                        Enables moon angle stabilization if given a non-
-                        negative value in degrees, do not enable if processing
-                        partial solar eclipse images. (default: -1)
+                        Rotates the outputted images. Enables moon angle
+                        stabilization if given a non-negative value in degrees,
+                        do not enable if processing partial solar eclipse images.
+                        (default: -1)
   --moon_radius_mod MOON_RADIUS_MOD
                         (MOON_RADIUS - SUN_RADIUS) in pixels, use a negative
                         value if the moon is smaller than the sun (as is the
@@ -341,7 +318,4 @@ optional arguments:
   
 
 # Donations
-
-If this project has helped you save some time, you can give me a cup of coffee :)
-
-[![paypal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)]([YOUR_EMAIL_CODE](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=hotdogee@gmail.com&lc=US&item_name=Solar+eclipse+timelapse+aligner+Development+Support&no_note=0&cn=&currency_code=USD&bn=PP-DonationsBF:btn_donateCC_LG.gif:NonHosted))
+The original creator of this code has a paypal here: [![paypal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)]([YOUR_EMAIL_CODE](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=hotdogee@gmail.com&lc=US&item_name=Solar+eclipse+timelapse+aligner+Development+Support&no_note=0&cn=&currency_code=USD&bn=PP-DonationsBF:btn_donateCC_LG.gif:NonHosted))
