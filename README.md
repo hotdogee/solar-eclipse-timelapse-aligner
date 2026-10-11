@@ -76,7 +76,7 @@ Each command saves the results next to the input directory (`examples/example1-o
 | Example | Images | Expected `circles_data.json` |
 | --- | --- | --- |
 | `example0` | annularity, sun radius detected from `ring.jpg` | `{"ring.jpg": {"sun": [240, 180, 127]}}` |
-| `example1` | partial phases, 416x312 crops | `{"ex1.jpg": {"sun": [238, 153, 110]}, "ex2.jpg": {"sun": [251, 147, 110]}, "ex3.jpg": {"sun": [276, 132, 110]}, "ex4.jpg": {"sun": [284, 140, 110]}, "ex5.jpg": {"sun": [302, 144, 110]}, "ex6.jpg": {"sun": [189, 131, 110]}}` |
+| `example1` | crops of [`docs/doc-angle.jpg`](docs/doc-angle.jpg), partial and annular phases, slightly different sizes (the output is sized from `ex1.jpg`) | `{"ex1.jpg": {"sun": [238, 153, 110]}, "ex2.jpg": {"sun": [251, 147, 110]}, "ex3.jpg": {"sun": [276, 132, 110]}, "ex4.jpg": {"sun": [284, 140, 110]}, "ex5.jpg": {"sun": [302, 144, 110]}, "ex6.jpg": {"sun": [189, 131, 110]}}` |
 | `example2` | 2024 eclipse photos from #5, small sun in a large frame, the threshold matters | `{"DSC05686.jpg": {"sun": [713, 1099, 141]}, "DSC05688.jpg": {"sun": [1382, 1166, 141]}, "DSC05690.jpg": {"sun": [1569, 1360, 141]}, "DSC05702.jpg": {"sun": [477, 1539, 141]}, "DSC05703.jpg": {"sun": [544, 1549, 141]}, "DSC05704.jpg": {"sun": [653, 919, 141]}}` |
 
 ## Input image requirements
@@ -113,7 +113,7 @@ This program currently only has a command line interface.
 
    `--sun_radius` You can also directly provide the sun radius in pixels to fine-tune the sun coordinate detection if the results are not perfect, or if the radius can not be detected (see [Troubleshooting](#the-sun-radius-is-detected-as-0-or-is-too-small)).
 
-3. For example, if I put the 8 example images inside `D:\eclipse\jpg` and use `D:\eclipse\jpg\DSCN3815.jpg` as the `--sun` image, I would run the following command:
+3. For example, if I put my 8 eclipse images inside `D:\eclipse\jpg` and use `D:\eclipse\jpg\DSCN3815.jpg` as the `--sun` image, I would run the following command:
 
     ```
     eclipse-aligner.exe --input=D:\eclipse\jpg --sun=D:\eclipse\jpg\DSCN3815.jpg
@@ -179,7 +179,7 @@ Use this feature if after viewing the results of sun centering, you determine th
   ```
   Output:
   ```
-  INFO: 8 images found in E:\test3\jpg
+  INFO: 8 images found in D:\eclipse\jpg
   INFO: Detected image size (height, width): (3456, 4608)
   INFO: Detected SUN RADIUS: 1210
   INFO: Using MOON RADIUS: 1186 (sun_radius + moon_radius_mod)
@@ -218,7 +218,7 @@ eclipse-aligner.exe --input=D:\eclipse\jpg --sun_radius=1210 --circles=D:\eclips
 | `--moon_radius_mod MOON_RADIUS_MOD` | `-24` | MOON_RADIUS - SUN_RADIUS in pixels, negative if the moon is smaller than the sun (annular eclipse). |
 | `--moon_threshold_mod MOON_THRESHOLD_MOD` | `-1` | Added to the dynamic Otsu threshold used for moon detection, choose a value that gives clean moon edges. |
 | `--max_phase_rotation_group_threshold THRESHOLD` | `30` | Images with a sun-moon distance below this (in pixels) reuse the rotation of the previous image. |
-| `--min_phase_rotation_group_threshold THRESHOLD` | `100` | Images where the shadowed width is less than this (in pixels) reuse the rotation of the previous image. |
+| `--min_phase_rotation_group_threshold THRESHOLD` | `100` | Images where the shadowed width is less than this (in pixels) reuse the rotation of the nearest image outside the group (the first image after the group at the start of the eclipse, the last image before the group at the end). |
 | `--filter` | off | Enables the clipped sun filter. |
 | `--clipped_cutoff CLIPPED_CUTOFF` | `40` | The filter moves images where any edge pixel is brighter than this. |
 | `--empty_cutoff EMPTY_CUTOFF` | `80` | The filter moves images where no pixel is brighter than this. |
@@ -342,7 +342,7 @@ Raised by `np.pad` in v1.0 when the sun is small compared to the image size ([#3
 
 ### The program hangs at `Processing: 0%`
 
-With `--filter`, v1.0 waited forever on Linux (or stopped with `name 'jpg_clipped_path' is not defined` on Windows and macOS) as soon as one image was moved to the `-clipped` directory ([#6](https://github.com/hotdogee/solar-eclipse-timelapse-aligner/issues/6)). The moved images are now listed in the output and left out of the results. If a worker process fails or crashes (for example when it runs out of memory), the program now stops with an error message and exit status 1 instead of waiting. If you run out of memory, use fewer `--workers`.
+With `--filter`, v1.0 waited forever on Linux (or stopped with `name 'jpg_clipped_path' is not defined` on Windows and macOS) as soon as one image was moved to the `-clipped` directory ([#6](https://github.com/hotdogee/solar-eclipse-timelapse-aligner/issues/6)). The moved images are now listed in the output and left out of the results. If a worker process fails or crashes (for example when it runs out of memory), the program now stops with an error message and exit status 1 instead of waiting, and Ctrl+C stops the workers and exits. If you run out of memory, use fewer `--workers`.
 
 ### `pip install -r requirements.txt` fails
 
