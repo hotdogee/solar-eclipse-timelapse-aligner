@@ -69,9 +69,9 @@ python eclipse-aligner.py
 # Print the full help message
 python eclipse-aligner.py -h
 # Optional: run these examples of input to confirm there are no errors (see below for information on workflow)
-python eclipse-aligner.py --input=example0/ --sun=example0/ring.jpg --circles=example0.json
-python eclipse-aligner.py --input=example1/ --sun_radius=110 --circles=example1.json
-python eclipse-aligner.py --input=example2/ --sun_radius=141 --sun_threshold=75 --circles=example2.json
+python eclipse-aligner.py --input=examples/example0/ --sun=examples/example0/ring.jpg --circles=example0.json
+python eclipse-aligner.py --input=examples/example1/ --sun_radius=110 --circles=example1.json
+python eclipse-aligner.py --input=examples/example2/ --sun_radius=141 --sun_threshold=75 --circles=example2.json
 ```
 The optional commands at the end are to check the program is functioning. It will ask you if it can save the detection location information to example0.json, example1.json, etc; enter yes. If everything is functioning smoothly, delete those files.
 

@@ -136,3 +136,8 @@ dev/
 # jpg test
 jpg*/
 circles_data.json
+
+# example outputs
+examples/*-*/
+examples/*.json
+example*.json
