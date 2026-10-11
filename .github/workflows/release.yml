@@ -1,0 +1,83 @@
+name: Release
+
+# Pushing a tag like v1.1 builds the Windows exe and attaches it to a draft GitHub Release,
+# review the generated notes and publish the draft on GitHub. Running the workflow manually
+# only builds the zip and uploads it as a workflow artifact.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows exe
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      ZIP_NAME: solar-eclipse-timelapse-aligner-${{ github.ref_name }}-windows-x64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      # setup-uv no longer publishes major version tags
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: false
+      - name: Install dependencies
+        run: uv pip install --system -r requirements-dev.txt
+      - name: Test
+        run: python -m pytest
+      - name: Build exe
+        run: pyinstaller --noconfirm --clean eclipse-aligner.spec
+      - name: Smoke test exe
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dist/eclipse-aligner/eclipse-aligner.exe --version
+          cp -r examples/example1 "$RUNNER_TEMP/example1"
+          dist/eclipse-aligner/eclipse-aligner.exe --input "$RUNNER_TEMP/example1" --sun_radius 110 --workers 2
+          test "$(find "$RUNNER_TEMP/example1-output" -name '*.jpg' | wc -l)" -eq 6
+      - name: Package zip
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir package
+          mv dist/eclipse-aligner package/
+          # start-cmd.bat with Windows line endings
+          sed 's/$/\r/' dist-files/start-cmd.bat > package/start-cmd.bat
+          python -c "import os, shutil; shutil.make_archive(os.environ['ZIP_NAME'], 'zip', 'package')"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64
+          path: ${{ env.ZIP_NAME }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Create draft release
+    needs: build-windows
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-x64
+      - name: Attach zip to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euxo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" ./*.zip --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" ./*.zip --draft --generate-notes --verify-tag --title "$TAG" --repo "$GITHUB_REPOSITORY"
+          fi
