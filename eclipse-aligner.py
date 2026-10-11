@@ -50,6 +50,12 @@ def make_sun_mask(sun_mask_r):
     return sun_mask
 
 
+def move_to_center(img, x, y, width, height):
+    '''Translate img so that pixel (x, y) is at the center of a new width x height image with a black background.'''
+    M = np.float64([[1, 0, width // 2 - x], [0, 1, height // 2 - y]])
+    return cv2.warpAffine(img, M, (width, height), flags=cv2.INTER_NEAREST)
+
+
 def find_sun_and_moon_worker(input_queue, output_queue, params):
     try:
         for jpg_path in iter(input_queue.get, 'STOP'):
@@ -94,22 +100,10 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
             # find center of moon
             #####################
             if params['fix_angle'] != -1:
-                img_h, img_w = img.shape[:2]
-                # pad image to canvas_size
-                pad_x, pad_y = (params['canvas_size'] - img_w) // 2, (params['canvas_size'] - img_h) // 2
-                padded = np.pad(img, ((pad_y, pad_y), (pad_x, pad_x), (0, 0)))
-                # calculate the distance between the center of the sun and the center of the image
-                center_x, center_y = img_w // 2, img_h // 2
-                canvas = np.zeros((params['canvas_size'], params['canvas_size'], img.shape[2]), dtype=np.uint8)
-                dx, dy = center_x - sun_x, center_y - sun_y
-                # draw sun at the center of the canvas
-                left, right = (0, dx) if dx > 0 else (-dx, 0)
-                up, down = (0, dy) if dy > 0 else (-dy, 0)
-                pad_h, pad_w = padded.shape[:2]
-                canvas[down:(pad_h - up), right:(pad_w - left), :] = padded[up:(pad_h - down), left:(pad_w - right), :]
+                # draw sun at the center of the canvas, the image is cropped or padded to fit the canvas, which
+                # depends only on the sun and moon radius and can be smaller than the image (#3)
+                canvas_gray = move_to_center(img_gray, sun_x, sun_y, params['canvas_size'], params['canvas_size'])
                 # locate moon
-                # grayscale
-                canvas_gray = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY)
                 # otsu
                 th, _ = cv2.threshold(canvas_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                 _, canvas_binary = cv2.threshold(canvas_gray, th + params['moon_threshold_mod'], 255, cv2.THRESH_BINARY)
@@ -128,9 +122,9 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
                     if dist < min_dist:
                         moon_x, moon_y, min_dist = int(cols[i]), int(rows[i]), float(dist)
                 # calculate moon coordinates in the original image
-                # moon_x is relative to moon_signal (4802, 4802)
-                original_moon_x = moon_x - (params['moon_signal_mask_size'] - img_w) // 2 - dx
-                original_moon_y = moon_y - (params['moon_signal_mask_size'] - img_h) // 2 - dy
+                # moon_x is relative to moon_signal (4802, 4802), which is centered on the sun
+                original_moon_x = sun_x + moon_x - moon_signal_center
+                original_moon_y = sun_y + moon_y - moon_signal_center
                 # DSCN0437.jpg: 3010, 4375, 1288, -77 -  4624, 2914, 1864, 154
                 # tqdm.write(
                 #     f'{jpg_path.name}: {original_moon_x}, {moon_x}, {pad_x}, {dx} - {original_moon_y}, {moon_y}, {pad_y}, {dy}'
@@ -168,20 +162,9 @@ def main(argv=None):
         # read jpg
         img = cv2.imread(str(jpg_path), cv2.IMREAD_COLOR)
         # (3456, 4608, 3)
-        img_h, img_w = img.shape[:2]
-        # pad image to canvas_size
-        pad_x, pad_y = (canvas_size - img_w) // 2, (canvas_size - img_h) // 2
-        padded = np.pad(img, ((pad_y, pad_y), (pad_x, pad_x), (0, 0)))
-        # calculate the distance between the center of the sun and the center of the image
-        center_x, center_y = img_w // 2, img_h // 2
-        canvas = np.zeros((canvas_size, canvas_size, img.shape[2]), dtype=np.uint8)
-        canvas_h, canvas_w = canvas.shape[:2]
-        dx, dy = center_x - sun_x, center_y - sun_y
-        # draw sun at the center of the canvas
-        left, right = (0, dx) if dx > 0 else (-dx, 0)
-        up, down = (0, dy) if dy > 0 else (-dy, 0)
-        pad_h, pad_w = padded.shape[:2]
-        canvas[down:(pad_h - up), right:(pad_w - left), :] = padded[up:(pad_h - down), left:(pad_w - right), :]
+        # move (and rotate) the image directly into an output image of the original size with a single affine
+        # transform, padding the image to the moon detection canvas size first failed when the sun was small (#3)
+        M = np.float64([[1, 0, 0], [0, 1, 0]])
         if args.fix_angle != -1:
             # update angle if min_dist > 30 and min_dist < (sun_mask_r + moon_mask_r - 100)
             moon_x, moon_y, moon_mask_r, min_dist, moon_signal_center = circles_data['moon']
@@ -195,13 +178,12 @@ def main(argv=None):
                 else:
                     angle = args.fix_angle - 180 - moon_degree
             # tqdm.write(f'{jpg_path.name} angle: {angle}')
-            # rotate canvas
-            center = (canvas_w // 2, canvas_h // 2)
-            M = cv2.getRotationMatrix2D(center, angle, 1.0)
-            canvas = cv2.warpAffine(canvas, M, (canvas_w, canvas_h))
-        # crop to original size
-        crop_x, crop_y = (canvas_w - crop_w) // 2, (canvas_h - crop_h) // 2
-        cropped = canvas[crop_y:crop_y + crop_h, crop_x:crop_x + crop_w]
+            # rotate around the center of the sun
+            M = cv2.getRotationMatrix2D((sun_x, sun_y), angle, 1.0)
+        # move the sun to the center and crop to original size
+        M[0, 2] += crop_w // 2 - sun_x
+        M[1, 2] += crop_h // 2 - sun_y
+        cropped = cv2.warpAffine(img, M, (crop_w, crop_h))
         # save cropped
         cv2.imwrite(str(jpg_output_path / jpg_path.name), cropped)
 
@@ -438,21 +420,29 @@ def main(argv=None):
     moon_mask_r = sun_mask_r + args.moon_radius_mod
     if args.fix_angle != -1:
         click.secho(f'INFO: Using MOON RADIUS: {moon_mask_r} (sun_radius + moon_radius_mod)')
+        if moon_mask_r < MIN_SUN_RADIUS:
+            click.secho(
+                f'ERROR: The MOON RADIUS (sun_radius + moon_radius_mod) must be at least {MIN_SUN_RADIUS} pixels, check --moon_radius_mod.',
+                fg='red'
+            )
+            sys.exit(1)
+    # the moon detection canvas has the sun at the center and room for the moon on every side, its size does not
+    # depend on the image size (#3)
     # 7184
-    canvas_size_original = (sun_mask_r + moon_mask_r * 2) * 2
-    canvas_size_alternate = max( img_h, img_w )
-    canvas_size = max(canvas_size_alternate, canvas_size_original)
-    click.secho(f'INFO: Determined a canvas size of: {canvas_size}.')
+    canvas_size = (sun_mask_r + moon_mask_r * 2) * 2
     # 4802
     moon_signal_mask_size = canvas_size - moon_mask_r * 2
     moon_signal_mask_r = moon_signal_mask_size // 2
 
     # create masks
     sun_mask = make_sun_mask(sun_mask_r)
-    moon_mask = np.zeros((moon_mask_r * 2 + 1, moon_mask_r * 2 + 1), np.float32)
-    _ = cv2.circle(moon_mask, (moon_mask_r, moon_mask_r), moon_mask_r, 1.0, -1)
-    moon_signal_mask = np.zeros((moon_signal_mask_size, moon_signal_mask_size), np.float32)
-    _ = cv2.circle(moon_signal_mask, (moon_signal_mask_r, moon_signal_mask_r), moon_signal_mask_r, 1.0, -1)
+    # the moon masks are only needed (and valid) for moon detection
+    moon_mask, moon_signal_mask = None, None
+    if args.fix_angle != -1:
+        moon_mask = np.zeros((moon_mask_r * 2 + 1, moon_mask_r * 2 + 1), np.float32)
+        _ = cv2.circle(moon_mask, (moon_mask_r, moon_mask_r), moon_mask_r, 1.0, -1)
+        moon_signal_mask = np.zeros((moon_signal_mask_size, moon_signal_mask_size), np.float32)
+        _ = cv2.circle(moon_signal_mask, (moon_signal_mask_r, moon_signal_mask_r), moon_signal_mask_r, 1.0, -1)
 
     # setup dirs
     jpg_clipped_path = jpg_dir_path.parent / (jpg_dir_path.name + args.clipped_suffix)
