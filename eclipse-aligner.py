@@ -2,10 +2,12 @@ import argparse
 import errno
 import json
 import os
+import queue
 import shutil
 import psutil
 import sys
 import time
+import traceback
 from multiprocessing import Manager, Process, Queue, Value, freeze_support
 from pathlib import Path
 
@@ -56,14 +58,51 @@ def move_to_center(img, x, y, width, height):
     return cv2.warpAffine(img, M, (width, height), flags=cv2.INTER_NEAREST)
 
 
+class WorkerError(Exception):
+    '''A worker process failed to process an image or exited unexpectedly.'''
+
+
+def collect_results(output_queue, processes, count, poll_interval=1.0):
+    '''Yield count (status, jpg_path, data) results sent by find_sun_and_moon_worker processes.
+
+    Raises WorkerError if a worker reports an error, or if a worker crashes or all workers exit before sending all
+    results (for example when a worker is killed for running out of memory), instead of waiting forever (#6).
+    '''
+    received = 0
+    while received < count:
+        try:
+            result = output_queue.get(timeout=poll_interval)
+        except queue.Empty:
+            crashed = [p for p in processes if p.exitcode not in (None, 0)]
+            if not crashed and any(p.exitcode is None for p in processes):
+                continue
+            # a result may have arrived just before the worker exited
+            try:
+                result = output_queue.get(timeout=poll_interval)
+            except queue.Empty:
+                exit_codes = ', '.join(str(p.exitcode) for p in processes)
+                raise WorkerError(
+                    f'{count - received} of {count} images were not processed because the worker processes exited unexpectedly (exit codes: {exit_codes}). This can be caused by running out of memory, try using fewer --workers.'
+                ) from None
+        status, jpg_path, data = result
+        if status == 'error':
+            raise WorkerError(f'Failed to process {jpg_path}:\n{data}')
+        received += 1
+        yield result
+
+
 def find_sun_and_moon_worker(input_queue, output_queue, params):
-    try:
-        for jpg_path in iter(input_queue.get, 'STOP'):
+    # every image taken from input_queue must produce exactly one (status, jpg_path, data) result in output_queue,
+    # status is 'ok', 'skipped' or 'error', a missing result made the main process wait forever (#6)
+    for jpg_path in iter(input_queue.get, 'STOP'):
+        try:
             # put the sun in the center of an image with enough border for moon detection by conv2d
             # we'll need a square image with sides of
             # (sun_radius + moon_radius * 2) * 2 = (1210 + 1191 * 2) * 2 = 7184
             # read jpg
             img = cv2.imread(str(jpg_path), cv2.IMREAD_COLOR)
+            if img is None:
+                raise ValueError('Unable to read the image, the file may be corrupted or not a JPG.')
             # (3456, 4608, 3)
             # remove images with white values on border (CLIPPED SUN)
             if params['filter']:
@@ -71,11 +110,13 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
                                                                               1].max() > params['clipped_cutoff']:
                     # print(f'Moving {jpg_path.name} with CLIPPED SUN ({clipped_count})')
                     shutil.move(jpg_path, params['jpg_clipped_path'] / jpg_path.name)
+                    output_queue.put(('skipped', jpg_path, 'CLIPPED SUN'))
                     continue
                 # remove images with all black values (NO SUN)
                 if img.max() < params['empty_cutoff']:
                     # print(f'Moving {jpg_path.name} with NO SUN ({empty_count})')
                     shutil.move(jpg_path, params['jpg_clipped_path'] / jpg_path.name)
+                    output_queue.put(('skipped', jpg_path, 'NO SUN'))
                     continue
             ####################
             # find center of sun
@@ -136,18 +177,19 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
                     circled, (original_moon_x - 5, original_moon_y - 5), (original_moon_x + 5, original_moon_y + 5),
                     (0, 128, 255), -1
                 )
-                # put in queue
-                output_queue.put((jpg_path, sun_x, sun_y, moon_x, moon_y, min_dist, moon_signal_center))
+                circles_data = {
+                    'moon': (moon_x, moon_y, params['moon_mask_r'], min_dist, moon_signal_center),
+                    'sun': (sun_x, sun_y, params['sun_mask_r'])
+                }
             else:
-                # put in queue
-                output_queue.put((jpg_path, sun_x, sun_y))
+                circles_data = {'sun': (sun_x, sun_y, params['sun_mask_r'])}
             # save circled
             cv2.imwrite(str(params['jpg_circled_path'] / jpg_path.name), circled)
-    except Exception as e:
-        if params['fix_angle'] != -1:
-            output_queue.put((jpg_path, -1, e, -1, -1, -1, -1))
-        else:
-            output_queue.put((jpg_path, -1, e))
+            # put in queue
+            output_queue.put(('ok', jpg_path, circles_data))
+        except Exception:
+            # report the error to the main process, the traceback is sent as text since not all exceptions pickle
+            output_queue.put(('error', jpg_path, traceback.format_exc()))
 
 
 def main(argv=None):
@@ -565,24 +607,28 @@ def main(argv=None):
             input_queue.put('STOP')
 
         # save circles data
-        for _ in tqdm(input_paths, desc='Processing', ascii=True, unit='img', dynamic_ncols=True, smoothing=0.1):
-            if args.fix_angle != -1:
-                jpg_path, sun_x, sun_y, moon_x, moon_y, min_dist, moon_signal_center = output_queue.get()
-            else:
-                jpg_path, sun_x, sun_y = output_queue.get()
-            # check for errors
-            if sun_x == -1:
-                click.secho(f'\nERROR: {jpg_path}: {sun_y}.', fg='red')
-                for p in input_processes:
-                    p.kill()
-                sys.exit(0)
-            if args.fix_angle != -1:
-                circles_data[jpg_path.name] = {
-                    'moon': (moon_x, moon_y, moon_mask_r, min_dist, moon_signal_center),
-                    'sun': (sun_x, sun_y, sun_mask_r)
-                }
-            else:
-                circles_data[jpg_path.name] = {'sun': (sun_x, sun_y, sun_mask_r)}
+        skipped_paths = set()
+        results = collect_results(output_queue, input_processes, num_images)
+        try:
+            for status, jpg_path, data in tqdm(
+                results, total=num_images, desc='Processing', ascii=True, unit='img', dynamic_ncols=True, smoothing=0.1
+            ):
+                if status == 'skipped':
+                    tqdm.write(f'INFO: Moved {jpg_path.name} with {data} to {jpg_clipped_path}')
+                    skipped_paths.add(jpg_path)
+                    continue
+                circles_data[jpg_path.name] = data
+        except WorkerError as e:
+            click.secho(f'\nERROR: {e}', fg='red')
+            # don't wait for the remaining input paths to be sent to the stopped workers on exit
+            input_queue.cancel_join_thread()
+            for p in input_processes:
+                p.kill()
+            sys.exit(1)
+        for p in input_processes:
+            p.join()
+        # images moved by the clipped sun filter are no longer in the input directory
+        input_paths = [p for p in input_paths if p not in skipped_paths]
 
         circles_data_json_path.write_text(json.dumps(circles_data))
 
