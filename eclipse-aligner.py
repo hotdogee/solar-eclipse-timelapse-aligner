@@ -15,6 +15,40 @@ import numpy as np
 from scipy import signal, spatial
 from tqdm import tqdm
 
+# smallest sun radius in pixels that the sun detection can work with
+MIN_SUN_RADIUS = 5
+
+
+def detect_sun_radius(img, sun_threshold):
+    '''Return the radius in pixels of the sun in img, or 0 if nothing is brighter than sun_threshold.
+
+    The sun is the largest bright connected component, preferring components that do not touch the image border.
+    Using the first component found (label 1) picked up single noisy pixels above the sun and gave a radius of 0 (#4).
+    '''
+    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, img_binary = cv2.threshold(img_gray, sun_threshold, 255, cv2.THRESH_BINARY)
+    _, _, stats, _ = cv2.connectedComponentsWithStats(img_binary)
+    # label 0 is the background
+    stats = stats[1:]
+    if len(stats) == 0:
+        return 0
+    img_h, img_w = img_binary.shape
+    x, y, w, h, area = stats.T
+    inside = (x > 0) & (y > 0) & (x + w < img_w) & (y + h < img_h)
+    candidates = np.flatnonzero(inside) if inside.any() else np.arange(len(stats))
+    sun = candidates[np.argmax(area[candidates])]
+    return int(max(w[sun], h[sun]) // 2)
+
+
+def make_sun_mask(sun_mask_r):
+    '''Ring shaped mask matching the edge of the sun, used to locate the sun by convolution.'''
+    # the ring is 50 pixels wide for large suns, and narrower for suns with a radius below 100 pixels (#4)
+    ring_width = max(1, min(50, sun_mask_r // 2))
+    sun_mask = np.zeros((sun_mask_r * 2 + 1, sun_mask_r * 2 + 1), np.float32)
+    _ = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r, 1.0, -1)
+    _ = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r - ring_width, 0.0, -1)
+    return sun_mask
+
 
 def find_sun_and_moon_worker(input_queue, output_queue, params):
     try:
@@ -365,6 +399,9 @@ def main(argv=None):
         # use given sun radius
         sun_mask_r = args.sun_radius
         click.secho(f'INFO: Using given SUN RADIUS: {sun_mask_r}')
+        if sun_mask_r < MIN_SUN_RADIUS:
+            click.secho(f'ERROR: --sun_radius must be at least {MIN_SUN_RADIUS} pixels.', fg='red')
+            sys.exit(1)
     elif args.sun != '':
         # detect sun radius
         try:
@@ -376,14 +413,22 @@ def main(argv=None):
             click.secho('ERROR: --sun is a directory, please provide a JPG file.', fg='red')
             sys.exit(1)
         sun = cv2.imread(str(sun_path), cv2.IMREAD_COLOR)
-        sun_gray = cv2.cvtColor(sun, cv2.COLOR_BGR2GRAY)
-        _, sun_binary = cv2.threshold(sun_gray, args.sun_threshold, 255, cv2.THRESH_BINARY)
-        _, _, stats, _ = cv2.connectedComponentsWithStats(sun_binary)
-        sun_mask_r = int(max(stats[1][2:4]) // 2)
+        if sun is None:
+            click.secho(f'ERROR: Unable to read --sun image: {sun_path}', fg='red')
+            sys.exit(1)
+        sun_mask_r = detect_sun_radius(sun, args.sun_threshold)
         click.secho(f'INFO: Detected SUN RADIUS: {sun_mask_r}')
-        if sun_mask_r == 0:
-            click.secho(f'ERROR: Unable to compute sun radius from input image. Try adjusting --sun_threshold or calculating it manually and entering the manual calculation with --sun-radius', fg='red')            
-            sys.exit(1) 
+        if sun_mask_r < MIN_SUN_RADIUS:
+            click.secho(
+                f'ERROR: Unable to detect the sun in --sun image "{sun_path}" with --sun_threshold={args.sun_threshold}. Try an image with a clear and mostly un-eclipsed sun, adjust --sun_threshold until the sun has clean edges, or measure the sun radius in an image editor and pass it with --sun_radius instead of --sun.',
+                fg='red'
+            )
+            sys.exit(1)
+        if sun_mask_r * 2 >= min(sun.shape[:2]):
+            click.secho(
+                f'WARNING: The detected sun is as large as the --sun image, --sun_threshold={args.sun_threshold} may be lower than the brightness of the background. If the red circles in the -circled images are the wrong size, increase --sun_threshold or pass --sun_radius.',
+                fg='yellow'
+            )
     else:
         # print error message
         click.secho(f'ERROR: Please provide either --sun or --sun_radius', fg='red')
@@ -403,12 +448,7 @@ def main(argv=None):
     moon_signal_mask_r = moon_signal_mask_size // 2
 
     # create masks
-    if sun_mask_r < 50:
-        click.secho(f'ERROR: The calculated sun radius is smaller than 50 pixels. This code needs the sun radius to be larger than 50 pixels. Check the computed radius and/or resize your pictures.', fg='red')            
-        sys.exit(1) 
-    sun_mask = np.zeros((sun_mask_r * 2 + 1, sun_mask_r * 2 + 1), np.float32)
-    _ = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r, 1.0, -1)
-    _ = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r - 50, 0.0, -1)
+    sun_mask = make_sun_mask(sun_mask_r)
     moon_mask = np.zeros((moon_mask_r * 2 + 1, moon_mask_r * 2 + 1), np.float32)
     _ = cv2.circle(moon_mask, (moon_mask_r, moon_mask_r), moon_mask_r, 1.0, -1)
     moon_signal_mask = np.zeros((moon_signal_mask_size, moon_signal_mask_size), np.float32)
