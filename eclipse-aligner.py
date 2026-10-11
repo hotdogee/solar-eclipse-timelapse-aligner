@@ -232,7 +232,7 @@ if __name__ == '__main__':
         type=int,
         default=-1,
         help=
-        'Enables moon angle stabilization if given a non-negative value in degrees, do not enable if processing partial solar eclipse images. (default: %(default)s)'
+        'Rotates the outputted images. Enables moon angle stabilization if given a non-negative value in degrees, do not enable if processing partial solar eclipse images. (default: %(default)s)'
     )
     parser.add_argument(
         '--moon_radius_mod',
@@ -382,6 +382,9 @@ if __name__ == '__main__':
         _, _, stats, _ = cv2.connectedComponentsWithStats(sun_binary)
         sun_mask_r = int(max(stats[1][2:4]) // 2)
         click.secho(f'INFO: Detected SUN RADIUS: {sun_mask_r}')
+        if sun_mask_r == 0:
+            click.secho(f'ERROR: Unable to compute sun radius from input image. Try adjusting --sun_threshold or calculating it manually and entering the manual calculation with --sun-radius', fg='red')            
+            sys.exit(1) 
     else:
         # print error message
         click.secho(f'ERROR: Please provide either --sun or --sun_radius', fg='red')
@@ -392,12 +395,18 @@ if __name__ == '__main__':
     if args.fix_angle != -1:
         click.secho(f'INFO: Using MOON RADIUS: {moon_mask_r} (sun_radius + moon_radius_mod)')
     # 7184
-    canvas_size = (sun_mask_r + moon_mask_r * 2) * 2
+    canvas_size_original = (sun_mask_r + moon_mask_r * 2) * 2
+    canvas_size_alternate = max( img_h, img_w )
+    canvas_size = max(canvas_size_alternate, canvas_size_original)
+    click.secho(f'INFO: Determined a canvas size of: {canvas_size}.')
     # 4802
     moon_signal_mask_size = canvas_size - moon_mask_r * 2
     moon_signal_mask_r = moon_signal_mask_size // 2
 
     # create masks
+    if sun_mask_r < 50:
+        click.secho(f'ERROR: The calculated sun radius is smaller than 50 pixels. This code needs the sun radius to be larger than 50 pixels. Check the computed radius and/or resize your pictures.', fg='red')            
+        sys.exit(1) 
     sun_mask = np.zeros((sun_mask_r * 2 + 1, sun_mask_r * 2 + 1), np.float32)
     _ = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r, 1.0, -1)
     _ = cv2.circle(sun_mask, (sun_mask_r, sun_mask_r), sun_mask_r - 50, 0.0, -1)
