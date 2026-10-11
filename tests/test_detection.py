@@ -106,6 +106,20 @@ def test_collect_results_raises_when_workers_exit_early(aligner):
         list(aligner.collect_results(q, [FakeProcess(exitcode=0)], 2, poll_interval=0.01))
 
 
+def test_collect_results_stops_as_soon_as_a_worker_crashes(aligner):
+    # results from the remaining workers must not delay noticing the crash until all other images are processed
+    q = queue.Queue()
+    for i in range(3):
+        q.put(('ok', f'{i}.jpg', {'sun': (1, 2, 3)}))
+    processes = [FakeProcess(), FakeProcess()]
+    results = aligner.collect_results(q, processes, 4, poll_interval=0.01)
+    assert next(results)[1] == '0.jpg'
+    processes[1].exitcode = -9
+    with pytest.raises(aligner.WorkerError, match=r'3 of 4 images were not processed .*exit codes: running, -9'):
+        next(results)
+    assert q.qsize() == 2
+
+
 def test_collect_results_raises_when_a_real_worker_crashes(aligner):
     # a worker killed while processing an image (e.g. out of memory) used to hang the main process (#6)
     ctx = multiprocessing.get_context('spawn')

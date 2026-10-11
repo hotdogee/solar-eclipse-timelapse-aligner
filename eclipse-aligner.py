@@ -68,22 +68,30 @@ def collect_results(output_queue, processes, count, poll_interval=1.0):
     Raises WorkerError if a worker reports an error, or if a worker crashes or all workers exit before sending all
     results (for example when a worker is killed for running out of memory), instead of waiting forever (#6).
     '''
+
+    def exited_unexpectedly():
+        exit_codes = ', '.join('running' if p.exitcode is None else str(p.exitcode) for p in processes)
+        return WorkerError(
+            f'{count - received} of {count} images were not processed because the worker processes exited unexpectedly (exit codes: {exit_codes}). This can be caused by running out of memory, try using fewer --workers.'
+        )
+
     received = 0
     while received < count:
+        # check for crashed workers before every result, not only when no results arrive, the remaining workers can
+        # keep sending results until all the other images are processed
+        if any(p.exitcode not in (None, 0) for p in processes):
+            raise exited_unexpectedly()
         try:
             result = output_queue.get(timeout=poll_interval)
         except queue.Empty:
-            crashed = [p for p in processes if p.exitcode not in (None, 0)]
-            if not crashed and any(p.exitcode is None for p in processes):
+            # a worker is still running, or crashed (raised at the top of the loop)
+            if any(p.exitcode != 0 for p in processes):
                 continue
-            # a result may have arrived just before the worker exited
+            # all workers exited normally, a result may have arrived just before the last worker exited
             try:
                 result = output_queue.get(timeout=poll_interval)
             except queue.Empty:
-                exit_codes = ', '.join(str(p.exitcode) for p in processes)
-                raise WorkerError(
-                    f'{count - received} of {count} images were not processed because the worker processes exited unexpectedly (exit codes: {exit_codes}). This can be caused by running out of memory, try using fewer --workers.'
-                ) from None
+                raise exited_unexpectedly() from None
         status, jpg_path, data = result
         if status == 'error':
             raise WorkerError(f'Failed to process {jpg_path}:\n{data}')
