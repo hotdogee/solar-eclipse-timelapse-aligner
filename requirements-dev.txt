@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8,<10
+ruff>=0.6,<1
+pyinstaller>=6.10,<7

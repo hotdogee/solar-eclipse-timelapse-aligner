@@ -1,0 +1,12 @@
+# Tool configuration only, eclipse-aligner.py is run as a script and is not an installable package.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# syntax errors and undefined names
+select = ["E9", "F63", "F7", "F82"]

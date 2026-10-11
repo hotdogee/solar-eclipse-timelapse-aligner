@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # one grouped pull request per ecosystem per month
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    # requirements*.txt use ranges so pip can pick wheels for every supported Python version,
+    # only widen a range when a new release falls outside of it
+    versioning-strategy: increase-if-necessary
+    groups:
+      pip:
+        patterns: ['*']

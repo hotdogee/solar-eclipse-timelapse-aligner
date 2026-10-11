@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      # setup-uv no longer publishes major version tags
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: Install dependencies
+        run: uv pip install --system -r requirements-dev.txt
+      - name: Ruff
+        run: ruff check .
+      - name: Actionlint
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
+  test:
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: Install dependencies
+        run: uv pip install --system -r requirements-dev.txt
+      - name: Show versions
+        run: python -c "import sys, multiprocessing, cv2, numpy, scipy; print(sys.version, multiprocessing.get_start_method(), 'opencv', cv2.__version__, 'numpy', numpy.__version__, 'scipy', scipy.__version__)"
+      - name: Test
+        run: python -m pytest -v
+
+  test-lowest:
+    name: Test (ubuntu-latest, Python 3.10, lowest dependency versions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: Install the lowest versions allowed by requirements.txt
+        run: uv pip install --system --resolution lowest-direct -r requirements-dev.txt
+      - name: Show versions
+        run: python -c "import cv2, numpy, scipy; print('opencv', cv2.__version__, 'numpy', numpy.__version__, 'scipy', scipy.__version__)"
+      - name: Test
+        run: python -m pytest -v
