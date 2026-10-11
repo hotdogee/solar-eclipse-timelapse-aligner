@@ -1,13 +1,18 @@
 '''End to end tests that run eclipse-aligner.py on synthetic and example images in a temporary directory.'''
 import json
 import math
+import os
 import shutil
+import signal
+import subprocess
+import sys
+import time
 
 import cv2
 import numpy as np
 import pytest
 
-from conftest import EXAMPLES, draw_frame, read_jpg, run_cli, write_jpg
+from conftest import EXAMPLES, SCRIPT, draw_frame, read_jpg, run_cli, write_jpg
 
 OPTIONS = [
     '--input', '--sun', '--sun_radius', '--sun_threshold', '--fix_angle', '--moon_radius_mod', '--moon_threshold_mod',
@@ -240,6 +245,40 @@ def test_worker_errors_are_reported(tmp_path):
     assert result.returncode == 1
     assert 'Failed to process' in result.stdout and 'z_broken.jpg' in result.stdout
     assert 'Unable to read the image' in result.stdout
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='sends SIGINT to the process group like Ctrl+C in a terminal')
+def test_ctrl_c_exits_without_hanging(tmp_path):
+    # the input paths not yet read by the stopped workers filled the pipe, and the main process waited forever on exit
+    # for them to be sent
+    jpg_dir = tmp_path / ('j' * 200)
+    jpg_dir.mkdir()
+    write_jpg(jpg_dir / 'f0.jpg', draw_frame(1600, 1200, (800, 600), 150))
+    # long paths, more than the 64 KiB that a pipe holds
+    for i in range(600):
+        os.link(jpg_dir / 'f0.jpg', jpg_dir / f'f{i:04d}{"x" * 40}.jpg')
+    process = subprocess.Popen(
+        [sys.executable, str(SCRIPT), '--input', str(jpg_dir), '--sun_radius', '150', '--workers', '2'],
+        cwd=tmp_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        for line in process.stdout:
+            if 'Starting 2 workers' in line:
+                break
+        time.sleep(2)
+        os.killpg(process.pid, signal.SIGINT)
+        output, _ = process.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        output, _ = process.communicate()
+        pytest.fail(f'Still running 60 seconds after Ctrl+C:\n{output}')
+    print(output)
+    assert process.returncode == 130
+    assert 'Interrupted, stopping the workers' in output
 
 
 @pytest.mark.parametrize(

@@ -606,18 +606,18 @@ def main(argv=None):
         for jpg_path in input_paths:
             input_queue.put(jpg_path)
 
-        # input process
         input_processes = []
-        for i in range(workers):
-            ip = Process(target=find_sun_and_moon_worker, args=(input_queue, output_queue, params))
-            ip.start()
-            input_processes.append(ip)
-            input_queue.put('STOP')
-
-        # save circles data
         skipped_paths = set()
-        results = collect_results(output_queue, input_processes, num_images)
         try:
+            # input process
+            for i in range(workers):
+                ip = Process(target=find_sun_and_moon_worker, args=(input_queue, output_queue, params))
+                ip.start()
+                input_processes.append(ip)
+                input_queue.put('STOP')
+
+            # save circles data
+            results = collect_results(output_queue, input_processes, num_images)
             for status, jpg_path, data in tqdm(
                 results, total=num_images, desc='Processing', ascii=True, unit='img', dynamic_ncols=True, smoothing=0.1
             ):
@@ -626,13 +626,14 @@ def main(argv=None):
                     skipped_paths.add(jpg_path)
                     continue
                 circles_data[jpg_path.name] = data
-        except WorkerError as e:
-            click.secho(f'\nERROR: {e}', fg='red')
+        except (WorkerError, KeyboardInterrupt) as e:
+            interrupted = isinstance(e, KeyboardInterrupt)
+            click.secho('\nERROR: Interrupted, stopping the workers.' if interrupted else f'\nERROR: {e}', fg='red')
             # don't wait for the remaining input paths to be sent to the stopped workers on exit
             input_queue.cancel_join_thread()
             for p in input_processes:
                 p.kill()
-            sys.exit(1)
+            sys.exit(130 if interrupted else 1)
         for p in input_processes:
             p.join()
         # images moved by the clipped sun filter are no longer in the input directory
