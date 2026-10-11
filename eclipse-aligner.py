@@ -509,7 +509,7 @@ def main(argv=None):
             # error out if given a directory
             if circles_data_json_path.is_dir():
                 click.secho('ERROR: --circles is a directory, please provide a JSON file.', fg='red')
-                sys.exit(0)
+                sys.exit(1)
                 # raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), path)
             with circles_data_json_path.open('r') as f:
                 circles_data = json.load(f)
@@ -520,13 +520,13 @@ def main(argv=None):
                         f'ERROR: The sun coordinates data for the JPG image "{jpg_path.name}" was not found in --circles "{str(circles_data_json_path)}". Remove the --circles argument to process the image, or provide the correct --circles JSON file that contains the sun coordinates data for the JPG image "{jpg_path.name}"',
                         fg='red'
                     )
-                    sys.exit(0)
+                    sys.exit(1)
                 if args.fix_angle != -1 and 'moon' not in circles_data[jpg_path.name]:
                     click.secho(
                         f'ERROR: The moon coordinates data for the JPG image "{jpg_path.name}" was not found in --circles "{str(circles_data_json_path)}". Remove the --circles argument to process the image, or provide the correct --circles JSON file that contains the moon coordinates data for the JPG image "{jpg_path.name}"',
                         fg='red'
                     )
-                    sys.exit(0)
+                    sys.exit(1)
             # looks good
             click.secho(f'INFO: Using existing coordinates data: "{args.circles}".')
         else:
@@ -558,7 +558,7 @@ def main(argv=None):
             # 32 cpu = 98 GB - 26GB
             estimated_memory_per_worker = 3000000000 / (3456 * 4608) * img_size
             ram_workers = psutil.virtual_memory().available // estimated_memory_per_worker
-            cpu_workers = psutil.cpu_count(logical=False)
+            cpu_workers = psutil.cpu_count(logical=False) or os.cpu_count() or 1
             workers = int(max(1, min(ram_workers, cpu_workers)))
         # don't need more workers than input images
         if workers > num_images:
