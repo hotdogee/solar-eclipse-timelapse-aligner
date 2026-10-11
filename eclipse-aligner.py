@@ -30,12 +30,12 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
                 if img[:, (0, -1), 1].max() > params['clipped_cutoff'] or img[(0, -1), :,
                                                                               1].max() > params['clipped_cutoff']:
                     # print(f'Moving {jpg_path.name} with CLIPPED SUN ({clipped_count})')
-                    shutil.move(jpg_path, jpg_clipped_path / jpg_path.name)
+                    shutil.move(jpg_path, params['jpg_clipped_path'] / jpg_path.name)
                     continue
                 # remove images with all black values (NO SUN)
                 if img.max() < params['empty_cutoff']:
                     # print(f'Moving {jpg_path.name} with NO SUN ({empty_count})')
-                    shutil.move(jpg_path, jpg_clipped_path / jpg_path.name)
+                    shutil.move(jpg_path, params['jpg_clipped_path'] / jpg_path.name)
                     continue
             ####################
             # find center of sun
@@ -121,12 +121,11 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
             output_queue.put((jpg_path, -1, e))
 
 
-angle = 0
-if __name__ == '__main__':
-    freeze_support()
+def main(argv=None):
+    angle = 0
 
     def output_image(jpg_path, circles_data):
-        global angle
+        nonlocal angle
         # circles_data = {
         #     'moon': (moon_x, moon_y, moon_mask_r, min_dist, moon_signal_center),
         #     'sun': (sun_x, sun_y, sun_mask_r)
@@ -328,7 +327,7 @@ if __name__ == '__main__':
         help=
         'If not given, by default, the program will save the detected sun and moon location data in JSON format to a file named circles_data.json located in the same directory as the input directory, and will overwrite the file if exists. If the detected location are good, you can choose to move the file to another location for reuse if you decide to re-develop the DNGs with better settings. If given the path to the existing good circles_data.json, the program will read the sun and moon location data from the JSON file and perform the centering and angle stabilization using the data in the JSON file. (default: circles_data.json)'
     )
-    args, unparsed = parser.parse_known_args()
+    args, unparsed = parser.parse_known_args(argv)
     start_time = time.time()
 
     # verify input directory
@@ -416,8 +415,8 @@ if __name__ == '__main__':
     _ = cv2.circle(moon_signal_mask, (moon_signal_mask_r, moon_signal_mask_r), moon_signal_mask_r, 1.0, -1)
 
     # setup dirs
+    jpg_clipped_path = jpg_dir_path.parent / (jpg_dir_path.name + args.clipped_suffix)
     if args.filter:
-        jpg_clipped_path = jpg_dir_path.parent / (jpg_dir_path.name + args.clipped_suffix)
         jpg_clipped_path.mkdir(parents=True, exist_ok=True)
     jpg_sun_binary_path = jpg_dir_path.parent / (jpg_dir_path.name + args.sun_binary_suffix)
     jpg_sun_binary_path.mkdir(parents=True, exist_ok=True)
@@ -512,6 +511,7 @@ if __name__ == '__main__':
             'moon_signal_mask': moon_signal_mask,
             'moon_signal_mask_size': moon_signal_mask_size,
             'moon_mask_r': moon_mask_r,
+            'jpg_clipped_path': jpg_clipped_path,
             'jpg_circled_path': jpg_circled_path,
             'jpg_sun_binary_path': jpg_sun_binary_path,
             'jpg_moon_binary_path': jpg_moon_binary_path,
@@ -574,3 +574,8 @@ if __name__ == '__main__':
 
     # exit
     sys.exit(0)
+
+
+if __name__ == '__main__':
+    freeze_support()
+    main()
