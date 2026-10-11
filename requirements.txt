@@ -1,6 +1,6 @@
 numpy>=1.26,<3
 scipy>=1.13,<2
-opencv-python>=4.10,<6
+opencv-python>=4.10.0.84,<6
 click>=8.1,<9
 tqdm>=4.66,<5
 psutil>=5.9,<8
