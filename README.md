@@ -77,7 +77,7 @@ Each command saves the results next to the input directory (`examples/example1-o
 | --- | --- | --- |
 | `example0` | annularity, sun radius detected from `ring.jpg` | `{"ring.jpg": {"sun": [240, 180, 127]}}` |
 | `example1` | crops of [`docs/doc-angle.jpg`](docs/doc-angle.jpg), partial and annular phases, slightly different sizes (the output is sized from `ex1.jpg`) | `{"ex1.jpg": {"sun": [238, 153, 110]}, "ex2.jpg": {"sun": [251, 147, 110]}, "ex3.jpg": {"sun": [276, 132, 110]}, "ex4.jpg": {"sun": [284, 140, 110]}, "ex5.jpg": {"sun": [302, 144, 110]}, "ex6.jpg": {"sun": [189, 131, 110]}}` |
-| `example2` | 2024 eclipse photos from #5, small sun in a large frame, the threshold matters | `{"DSC05686.jpg": {"sun": [713, 1099, 141]}, "DSC05688.jpg": {"sun": [1382, 1166, 141]}, "DSC05690.jpg": {"sun": [1569, 1360, 141]}, "DSC05702.jpg": {"sun": [477, 1539, 141]}, "DSC05703.jpg": {"sun": [544, 1549, 141]}, "DSC05704.jpg": {"sun": [653, 919, 141]}}` |
+| `example2` | 2024 eclipse photos from #5, small sun in a large frame, the threshold matters | `{"DSC05686.jpg": {"sun": [713, 1099, 141]}, "DSC05688.jpg": {"sun": [1382, 1166, 141]}, "DSC05690.jpg": {"sun": [1569, 1360, 141]}, "DSC05702.jpg": {"sun": [477, 1539, 141]}, "DSC05703.jpg": {"sun": [544, 1549, 141]}, "DSC05704.jpg": {"sun": [653, 919, 141]}, "DSC05709.jpg": {"sun": [1174, 1239, 141]}}` |
 
 ## Input image requirements
 
