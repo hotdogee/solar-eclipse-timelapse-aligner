@@ -12,7 +12,7 @@ from pathlib import Path
 import cv2
 import click
 import numpy as np
-from scipy import signal, spatial
+from scipy import signal
 from tqdm import tqdm
 
 # smallest sun radius in pixels that the sun detection can work with
@@ -117,10 +117,11 @@ def find_sun_and_moon_worker(input_queue, output_queue, params):
                 # find the coordinate closest to the center of the sun (closest to the center of the moon_signal image)
                 moon_signal_center = moon_signal.shape[0] // 2
                 moon_x, moon_y, min_dist = 0, 0, 99999
-                for i in range(rows.shape[0]):
-                    dist = spatial.distance.euclidean([cols[i], rows[i]], [moon_signal_center, moon_signal_center])
-                    if dist < min_dist:
-                        moon_x, moon_y, min_dist = int(cols[i]), int(rows[i]), float(dist)
+                if rows.shape[0] > 0:
+                    # vectorized, a python loop over millions of candidates could take over a minute per image
+                    dists = np.sqrt((cols - moon_signal_center)**2 + (rows - moon_signal_center)**2)
+                    i = int(np.argmin(dists))
+                    moon_x, moon_y, min_dist = int(cols[i]), int(rows[i]), float(dists[i])
                 # calculate moon coordinates in the original image
                 # moon_x is relative to moon_signal (4802, 4802), which is centered on the sun
                 original_moon_x = sun_x + moon_x - moon_signal_center
